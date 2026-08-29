@@ -1,0 +1,9 @@
+# Copy to `.dev.vars` (git-ignored) for `wrangler dev`. Real values only live
+# in your local .dev.vars and in `wrangler secret put` for the deployed Worker.
+ANTHROPIC_API_KEY="sk-ant-..."
+GITHUB_CLIENT_ID="Iv1...."
+GITHUB_CLIENT_SECRET="...."
+# Random 32-byte hex, e.g. `openssl rand -hex 32`
+COOKIE_ENCRYPTION_KEY="...."
+# Your GitHub login (can also be set as a [vars] entry in wrangler.toml)
+ALLOWED_GITHUB_USER="your-github-username"

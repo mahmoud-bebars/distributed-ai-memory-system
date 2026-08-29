@@ -1,0 +1,45 @@
+name = "distributed-ai-memory-system"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Uncomment once DNS is pointed at this Worker
+routes = [
+  { pattern = "memory.mahmoudbebars.dev", custom_domain = true }
+]
+
+[[d1_databases]]
+binding = "DAMS_DB"
+database_name = "dams_db"
+database_id = "96ba75ef-db20-40af-86db-f1e630f818a8"
+
+[[r2_buckets]]
+binding = "DAMS_BUCKET"
+bucket_name = "dmas"
+
+[[kv_namespaces]]
+binding = "OAUTH_KV"
+id = "e6dc5a75983a4b8289c26a76f5b83e84"
+
+[assets]
+directory = "./app/dist"
+binding = "ASSETS"
+
+[vars]
+ENVIRONMENT = "development"
+# The single GitHub login allowed to complete the /mcp OAuth flow. Not
+# sensitive (it's a public username), so it lives here as a var — but you MUST
+# set it to your own login before deploying. Leaving it empty means nobody can
+# authenticate. Alternatively override with: wrangler secret put ALLOWED_GITHUB_USER
+ALLOWED_GITHUB_USER = ""
+
+# Secrets — set each with `wrangler secret put <NAME>` (and mirror them in a
+# local, git-ignored .dev.vars for `wrangler dev`):
+#   wrangler secret put ANTHROPIC_API_KEY      # existing — chat-with-memory
+#   wrangler secret put GITHUB_CLIENT_ID       # GitHub OAuth App client id
+#   wrangler secret put GITHUB_CLIENT_SECRET   # GitHub OAuth App client secret
+#   wrangler secret put COOKIE_ENCRYPTION_KEY  # random 32-byte hex; signs the
+#                                              # consent/approval cookies
+#
+# OAUTH_KV (above) backs the OAuthProvider's grant/state storage.
+
