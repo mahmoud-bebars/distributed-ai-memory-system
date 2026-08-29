@@ -1,6 +1,3 @@
-GITHUB.md
-PROJECT_UNDERSTANDING.md
-DEPLOY.md
 notes.txt
 
 # Local secrets for `wrangler dev` — never commit
