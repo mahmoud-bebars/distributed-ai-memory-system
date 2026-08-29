@@ -29,6 +29,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   listProjects: () => request<Project[]>("/projects"),
+  createProject: (input: { slug: string; title: string; tags: string[] }) =>
+    request<Project>("/projects", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
   getMemory: (slug: string) => request<MemoryEntry[]>(`/projects/${slug}/memory`),
   askChat: (slug: string, question: string) =>
     request<{ answer: string }>(`/projects/${slug}/chat`, {

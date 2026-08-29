@@ -9,8 +9,12 @@ export default function App() {
   const [selected, setSelected] = useState<string | null>(null);
   const [entries, setEntries] = useState<MemoryEntry[]>([]);
 
-  useEffect(() => {
+  function refreshProjects() {
     api.listProjects().then(setProjects).catch(() => setProjects([]));
+  }
+
+  useEffect(() => {
+    refreshProjects();
   }, []);
 
   useEffect(() => {
@@ -23,7 +27,7 @@ export default function App() {
       <h1 className="text-xl font-medium mb-4">Distributed AI Memory System</h1>
 
       {!selected ? (
-        <ProjectList projects={projects} onSelect={setSelected} />
+        <ProjectList projects={projects} onSelect={setSelected} onCreated={refreshProjects} />
       ) : (
         <div>
           <button onClick={() => setSelected(null)} className="text-sm text-indigo-600 mb-4">
