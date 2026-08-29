@@ -13,8 +13,14 @@ projectsRoutes.get("/", async (c) => {
 
 projectsRoutes.post("/", zValidator("json", createProjectSchema), async (c) => {
   const service = new ProjectsService(c.env);
-  const project = await service.create(c.req.valid("json"));
-  return c.json(project, 201);
+  try {
+    const project = await service.create(c.req.valid("json"));
+    return c.json(project, 201);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    const status = message.startsWith("Project already exists") ? 409 : 500;
+    return c.json({ error: message }, status);
+  }
 });
 
 projectsRoutes.get("/:slug/memory", async (c) => {

@@ -22,7 +22,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
   });
   if (!response.ok) {
-    throw new Error(`Request to ${path} failed: ${response.status}`);
+    // Surface the server's { error } message when there is one, so failures
+    // like a duplicate slug read as the actual reason rather than a bare 500.
+    let detail = String(response.status);
+    try {
+      const body = (await response.json()) as { error?: unknown };
+      if (typeof body.error === "string") detail = body.error;
+    } catch {
+      // Non-JSON body — keep the status code.
+    }
+    throw new Error(`Request to ${path} failed: ${detail}`);
   }
   return response.json() as Promise<T>;
 }

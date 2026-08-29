@@ -23,6 +23,14 @@ export class ProjectsService {
   }
 
   async create(input: CreateProjectInput): Promise<ProjectRow> {
+    // Guard before touching R2 so a duplicate slug can't (a) blow up with an
+    // opaque 500 on the D1 primary-key violation, nor (b) orphan a seeded R2
+    // object for a row that never gets inserted. The route maps this message
+    // to a 409, mirroring how the chat route maps "Unknown project" to a 404.
+    if (await this.get(input.slug)) {
+      throw new Error(`Project already exists: ${input.slug}`);
+    }
+
     const r2Key = r2KeyFor(input.slug);
 
     // Seed an empty object so reads never 404 before the first append.
