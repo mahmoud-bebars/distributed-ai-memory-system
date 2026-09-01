@@ -26,6 +26,35 @@
   entries carry a `name` and relation entries carry `source`/`target`
   matching entity names — if you change entry shapes, update that
   assumption or the graph silently renders nothing.
+- Content shape conventions by type (documented, not Zod-enforced — see
+  `memoryEntrySchema` in `src/modules/projects/schema.ts` — enforcing them
+  strictly would reject entries written before the convention existed):
+  - `entity`: `{ name, category? }`. `category` is one of
+    `entityCategorySchema`'s ten values; readers default to `"other"`
+    (`DEFAULT_ENTITY_CATEGORY`) when it's absent. Old entities predate this
+    field — that's expected, not a bug to backfill automatically.
+  - `observation`: `{ text, entity? }`. `text` is the plain-language note;
+    `entity` optionally names which entity (by name) it's about — absent
+    means a general project note, not an error. Entries that predate this
+    shape (no `text` string) fall back to a JSON preview in the UI rather
+    than breaking.
+  - `relation`: `{ source, target, label? }` — unchanged.
+- **Entities are last-write-wins, not append-once.** An entity can be
+  appended again under the same `name`; the append-only log keeps every
+  revision (the raw R2 file and `read_memory` still return all of them —
+  never filtered), but any reader building a "current" view (the frontend
+  graph/entries table, `update_entity`) should dedupe by `content.name`
+  and keep the last occurrence in file order. The canonical implementation
+  is `currentEntities()`, duplicated in `src/modules/projects/service.ts`
+  (backend) and `app/src/lib/memory.ts` (frontend, which doesn't build
+  against the Worker's source tree) — keep both in sync if the rule
+  changes. Relations and observations are never deduped; every one is
+  part of the log.
+- `update_entity` (MCP tool, `src/modules/mcp`) is how a category (or any
+  other entity field) gets attached after the fact: it appends a new
+  entity revision merging the given fields onto the entity's current
+  content. It fails clearly if no entity with that name exists yet —
+  creating one is still `append_memory`'s job.
 
 ## MCP + OAuth conventions (added with the /mcp layer)
 
@@ -47,6 +76,7 @@
 - Tool input schemas live in `mcp/schema.ts` as Zod *raw shapes* (what
   `registerTool` expects), and `append_memory` reuses `memoryEntrySchema`
   from the projects module rather than redefining the entry shape.
+  `update_entity` similarly reuses `entityCategorySchema`.
 - OAuth wiring lives in `src/modules/auth`. `workers-oauth-utils.ts` is
   vendored from Cloudflare's `remote-mcp-github-oauth` reference (CSRF +
   session-bound state + signed approval cookies) — treat it as vendored

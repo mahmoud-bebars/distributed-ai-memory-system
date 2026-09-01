@@ -3,7 +3,12 @@ import { CfWorkerJsonSchemaValidator } from "@modelcontextprotocol/sdk/validatio
 import type { Bindings } from "../../lib/bindings";
 import { ChatService } from "../chat";
 import { ProjectsService } from "../projects";
-import { appendMemoryInput, askMemoryInput, readMemoryInput } from "./schema";
+import {
+  appendMemoryInput,
+  askMemoryInput,
+  readMemoryInput,
+  updateEntityInput,
+} from "./schema";
 
 const SERVER_INFO = { name: "distributed-ai-memory-system", version: "0.1.0" } as const;
 
@@ -72,6 +77,24 @@ export function buildMemoryMcpServer(env: Bindings): McpServer {
       try {
         await projects.appendMemory(slug, entry);
         return jsonResult({ ok: true });
+      } catch (err) {
+        return errorResult(err instanceof Error ? err.message : "Unknown error");
+      }
+    },
+  );
+
+  server.registerTool(
+    "update_entity",
+    {
+      description:
+        "Update an existing entity by appending a new revision that merges the given fields (e.g. category) onto its current content — last-write-wins, the append-only log keeps every prior revision. Fails if no entity with that name exists yet; use append_memory to create one.",
+      inputSchema: updateEntityInput,
+    },
+    async ({ slug, name, category, fields }) => {
+      try {
+        const updates = { ...(fields ?? {}), ...(category !== undefined ? { category } : {}) };
+        const entry = await projects.updateEntity(slug, name, updates);
+        return jsonResult(entry);
       } catch (err) {
         return errorResult(err instanceof Error ? err.message : "Unknown error");
       }

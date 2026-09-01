@@ -1,3 +1,3 @@
 export { projectsRoutes } from "./routes";
-export { ProjectsService } from "./service";
+export { ProjectsService, currentEntities } from "./service";
 export * from "./schema";

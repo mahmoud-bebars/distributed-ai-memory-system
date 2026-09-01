@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { memoryEntrySchema, slugSchema } from "../projects/schema";
+import { entityCategorySchema, memoryEntrySchema, slugSchema } from "../projects/schema";
 
 // MCP tool input schemas.
 //
@@ -23,4 +23,13 @@ export const appendMemoryInput = {
 export const askMemoryInput = {
   slug: slugSchema,
   question: z.string().min(1).max(4000),
+};
+
+export const updateEntityInput = {
+  slug: slugSchema,
+  name: z.string().min(1),
+  category: entityCategorySchema.optional(),
+  // Any other entity content fields to merge in beyond `category` — merged
+  // onto the existing entry's content, same as `category` would be.
+  fields: z.record(z.unknown()).optional(),
 };

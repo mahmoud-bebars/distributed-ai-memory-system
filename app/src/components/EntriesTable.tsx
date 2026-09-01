@@ -1,7 +1,9 @@
 import { Fragment, useMemo, useState } from "react";
 import type { MemoryEntry } from "@/api";
+import { CategoryBadge } from "@/components/CategoryBadge";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -9,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import {
   Table,
   TableBody,
@@ -17,6 +20,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { categoryOf, currentEntities, observationText, relationLabel } from "@/lib/memory";
 
 type TypeFilter = "all" | MemoryEntry["type"];
 
@@ -26,28 +30,80 @@ const TYPE_BADGE_VARIANT: Record<MemoryEntry["type"], "default" | "secondary" | 
   observation: "outline",
 };
 
-function preview(entry: MemoryEntry): string {
+function jsonPreview(entry: MemoryEntry): string {
   const text = JSON.stringify(entry.content);
   return text.length > 120 ? `${text.slice(0, 120)}…` : text;
+}
+
+function Summary({ entry }: { entry: MemoryEntry }) {
+  if (entry.type === "entity") {
+    const name = entry.content.name;
+    if (typeof name !== "string") {
+      return <span className="font-mono text-xs text-muted-foreground">{jsonPreview(entry)}</span>;
+    }
+    return (
+      <div className="flex items-center gap-2">
+        <span className="font-medium">{name}</span>
+        <CategoryBadge category={categoryOf(entry)} />
+      </div>
+    );
+  }
+
+  if (entry.type === "relation") {
+    const source = entry.content.source;
+    const target = entry.content.target;
+    if (typeof source !== "string" || typeof target !== "string") {
+      return <span className="font-mono text-xs text-muted-foreground">{jsonPreview(entry)}</span>;
+    }
+    const label = relationLabel(entry);
+    return (
+      <div>
+        <div className="font-medium">
+          {source} → {target}
+        </div>
+        {label && <div className="text-xs text-muted-foreground">{label}</div>}
+      </div>
+    );
+  }
+
+  // observation
+  const text = entry.content.text;
+  if (typeof text !== "string") {
+    return <span className="font-mono text-xs text-muted-foreground">{jsonPreview(entry)}</span>;
+  }
+  const preview = observationText(entry);
+  return <span>{preview.length > 100 ? `${preview.slice(0, 100)}…` : preview}</span>;
 }
 
 export function EntriesTable({ entries }: { entries: MemoryEntry[] }) {
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
   const [query, setQuery] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [showSuperseded, setShowSuperseded] = useState(false);
+
+  const currentEntityIds = useMemo(() => new Set(currentEntities(entries).map((e) => e.id)), [
+    entries,
+  ]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return entries.filter((entry) => {
       if (typeFilter !== "all" && entry.type !== typeFilter) return false;
+      if (!showSuperseded && entry.type === "entity" && !currentEntityIds.has(entry.id)) {
+        return false;
+      }
       if (!q) return true;
       return JSON.stringify(entry).toLowerCase().includes(q);
     });
-  }, [entries, typeFilter, query]);
+  }, [entries, typeFilter, query, showSuperseded, currentEntityIds]);
+
+  const supersededCount = entries.filter(
+    (e) => e.type === "entity" && !currentEntityIds.has(e.id)
+  ).length;
 
   return (
     <div className="flex h-full flex-col gap-3">
-      <div className="flex gap-2">
+      <div className="flex flex-wrap items-center gap-4">
         <Input
           placeholder="Search entries…"
           value={query}
@@ -65,6 +121,18 @@ export function EntriesTable({ entries }: { entries: MemoryEntry[] }) {
             <SelectItem value="observation">Observation</SelectItem>
           </SelectContent>
         </Select>
+        {supersededCount > 0 && (
+          <div className="flex items-center gap-2">
+            <Switch
+              id="show-superseded"
+              checked={showSuperseded}
+              onCheckedChange={setShowSuperseded}
+            />
+            <Label htmlFor="show-superseded" className="text-sm font-normal text-muted-foreground">
+              Show superseded entity revisions ({supersededCount})
+            </Label>
+          </div>
+        )}
         <p className="ml-auto self-center text-xs text-muted-foreground">
           {filtered.length} of {entries.length} entries
         </p>
@@ -74,8 +142,8 @@ export function EntriesTable({ entries }: { entries: MemoryEntry[] }) {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-28">Type</TableHead>
-              <TableHead>Preview</TableHead>
+              <TableHead className="w-32">Type</TableHead>
+              <TableHead>Summary</TableHead>
               <TableHead className="w-44">Created</TableHead>
             </TableRow>
           </TableHeader>
@@ -89,6 +157,7 @@ export function EntriesTable({ entries }: { entries: MemoryEntry[] }) {
             ) : (
               filtered.map((entry) => {
                 const isExpanded = expandedId === entry.id;
+                const isSuperseded = entry.type === "entity" && !currentEntityIds.has(entry.id);
                 return (
                   <Fragment key={entry.id}>
                     <TableRow
@@ -96,10 +165,13 @@ export function EntriesTable({ entries }: { entries: MemoryEntry[] }) {
                       onClick={() => setExpandedId(isExpanded ? null : entry.id)}
                     >
                       <TableCell>
-                        <Badge variant={TYPE_BADGE_VARIANT[entry.type]}>{entry.type}</Badge>
+                        <div className="flex flex-wrap items-center gap-1">
+                          <Badge variant={TYPE_BADGE_VARIANT[entry.type]}>{entry.type}</Badge>
+                          {isSuperseded && <Badge variant="outline">superseded</Badge>}
+                        </div>
                       </TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">
-                        {preview(entry)}
+                      <TableCell className="text-sm">
+                        <Summary entry={entry} />
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
                         {entry.created_at ?? "—"}

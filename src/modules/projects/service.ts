@@ -6,6 +6,21 @@ import type { CreateProjectInput, MemoryEntry } from "./schema";
 
 const r2KeyFor = (slug: string) => `${slug}/memory.jsonl`;
 
+const entityName = (entry: MemoryEntry): string => String(entry.content.name ?? entry.id);
+
+/** Last-write-wins projection of entities: dedupe by `content.name`,
+ *  keeping the last occurrence in file order as current. Storage stays
+ *  append-only — this reads the log, it never rewrites it. Relations and
+ *  observations aren't deduped here; every one is part of the log. */
+export function currentEntities(entries: MemoryEntry[]): MemoryEntry[] {
+  const byName = new Map<string, MemoryEntry>();
+  for (const entry of entries) {
+    if (entry.type !== "entity") continue;
+    byName.set(entityName(entry), entry);
+  }
+  return Array.from(byName.values());
+}
+
 export class ProjectsService {
   private readonly db: DrizzleD1Database;
 
@@ -93,5 +108,31 @@ export class ProjectsService {
         updatedAt: sql`(datetime('now'))`,
       })
       .where(eq(projects.slug, slug));
+  }
+
+  /** Appends a new revision of an existing entity, merging `updates` onto
+   *  its current (last-write-wins) content. Fails if no entity with that
+   *  name exists yet — creation stays `appendMemory`'s job, this only
+   *  edits. */
+  async updateEntity(
+    slug: string,
+    name: string,
+    updates: Record<string, unknown>
+  ): Promise<MemoryEntry> {
+    const entries = await this.readMemory(slug);
+    const current = currentEntities(entries).find((e) => entityName(e) === name);
+    if (!current) {
+      throw new Error(`Unknown entity: ${name} (in project ${slug})`);
+    }
+
+    const entry: MemoryEntry = {
+      id: crypto.randomUUID(),
+      type: "entity",
+      content: { ...current.content, ...updates, name },
+      created_at: new Date().toISOString(),
+    };
+
+    await this.appendMemory(slug, entry);
+    return entry;
   }
 }
