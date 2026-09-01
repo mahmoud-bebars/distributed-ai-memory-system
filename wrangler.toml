@@ -5,7 +5,8 @@ compatibility_flags = ["nodejs_compat"]
 
 # Uncomment once DNS is pointed at this Worker
 routes = [
-  { pattern = "memory.mahmoudbebars.dev", custom_domain = true }
+  { pattern = "memory.mahmoudbebars.dev", custom_domain = true },
+  { pattern = "mcp.mahmoudbebars.dev", custom_domain = true }
 ]
 
 [[d1_databases]]
