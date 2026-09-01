@@ -29,6 +29,22 @@ projectsRoutes.get("/:slug/memory", async (c) => {
   return c.json(entries);
 });
 
+// Streams the raw R2 object bytes (the real memory.jsonl) rather than
+// re-serialized JSON — a byte-for-byte copy for backup/portability.
+projectsRoutes.get("/:slug/memory/raw", async (c) => {
+  const service = new ProjectsService(c.env);
+  const slug = c.req.param("slug");
+  const object = await service.readMemoryRaw(slug);
+  if (!object) return c.json({ error: `Unknown project: ${slug}` }, 404);
+
+  return new Response(object.body, {
+    headers: {
+      "content-type": "application/x-ndjson",
+      "content-disposition": `attachment; filename="${slug}-memory.jsonl"`,
+    },
+  });
+});
+
 projectsRoutes.post(
   "/:slug/memory",
   zValidator("json", appendMemorySchema),

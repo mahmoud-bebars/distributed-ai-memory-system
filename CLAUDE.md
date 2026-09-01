@@ -58,6 +58,27 @@
   `defaultHandler`; `apiRoute` is `/mcp` alone. Never widen `apiRoute` to
   cover `/api/*` or the assets — those stay unauthenticated by design.
 
+## Frontend conventions (shadcn/ui)
+
+- `app/` uses shadcn/ui (CLI-managed, `radix-nova` preset) on top of
+  **Tailwind v4**, not v3 — v4 was the CLI's current default when this was
+  set up, and its generated components rely on v4-only CSS (`@theme`,
+  `@custom-variant`). Don't reintroduce a v3 `tailwind.config.js`; theming
+  lives in `app/src/index.css` via `@theme inline` + CSS custom properties.
+  Styling is driven by `@tailwindcss/vite`, not postcss — there's no
+  `postcss.config.js`.
+- Primitives live in `app/src/components/ui/` and are installed with
+  `npx shadcn@latest add <component>` from inside `app/` — never
+  hand-write a component that mimics shadcn's API; add it with the CLI so
+  it stays in sync with `components.json`.
+- Path alias `@/*` → `app/src/*` (see `app/tsconfig.json` and
+  `app/vite.config.ts`) — shadcn components import via `@/lib/utils` etc.,
+  so new files should follow that convention too.
+- Layout is sidebar + tabs, not the old list/detail toggle: `AppSidebar`
+  (project switcher) wraps `SidebarProvider`/`SidebarInset`, and
+  `ProjectView` renders `Tabs` (Graph / Entries / Chat) plus the Export
+  dropdown, per project.
+
 ## What's deliberately not built yet
 
 - Retrieval for chat — `ChatService` currently dumps the whole project's

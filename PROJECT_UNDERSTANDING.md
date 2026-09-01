@@ -68,8 +68,17 @@ Two different things need gating, and they're not the same mechanism:
 
 ## Current status
 
-REST API (projects CRUD, memory read/append) and chat-with-memory are
-built and deployed.
+REST API (projects CRUD, memory read/append, plus a raw
+`GET /api/projects/:slug/memory/raw` that streams the R2 `memory.jsonl`
+object byte-for-byte for backup/export) and chat-with-memory are built
+and deployed.
+
+The web UI (`app/`) got a full pass: shadcn/ui components, a persistent
+project sidebar instead of list/detail toggling, a Graph/Entries/Chat tab
+layout per project, an interactive memory graph (drag, zoom, search,
+click-to-inspect side panel), a raw Entries table with type/text
+filtering, and an Export control (pretty JSON of the fetched view, or the
+byte-for-byte raw `.jsonl` from the new route).
 
 The **MCP layer and OAuth are now built** (`src/modules/mcp` and
 `src/modules/auth`). `/mcp` exposes four tools — `list_projects`,

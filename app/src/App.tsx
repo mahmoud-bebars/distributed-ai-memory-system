@@ -1,13 +1,13 @@
-import { useEffect, useState } from "react";
-import { api, type MemoryEntry, type Project } from "./api";
-import { ChatPanel } from "./components/ChatPanel";
-import { MemoryGraph } from "./components/MemoryGraph";
-import { ProjectList } from "./components/ProjectList";
+import { useEffect, useMemo, useState } from "react";
+import { api, type Project } from "@/api";
+import { AppSidebar } from "@/components/AppSidebar";
+import { ProjectView } from "@/components/ProjectView";
+import { Separator } from "@/components/ui/separator";
+import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 
 export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
-  const [entries, setEntries] = useState<MemoryEntry[]>([]);
 
   function refreshProjects() {
     api.listProjects().then(setProjects).catch(() => setProjects([]));
@@ -17,28 +17,40 @@ export default function App() {
     refreshProjects();
   }, []);
 
-  useEffect(() => {
-    if (!selected) return;
-    api.getMemory(selected).then(setEntries).catch(() => setEntries([]));
-  }, [selected]);
+  const selectedProject = useMemo(
+    () => projects.find((p) => p.slug === selected) ?? null,
+    [projects, selected]
+  );
 
   return (
-    <div className="max-w-5xl mx-auto p-6">
-      <h1 className="text-xl font-medium mb-4">Distributed AI Memory System</h1>
-
-      {!selected ? (
-        <ProjectList projects={projects} onSelect={setSelected} onCreated={refreshProjects} />
-      ) : (
-        <div>
-          <button onClick={() => setSelected(null)} className="text-sm text-indigo-600 mb-4">
-            ← back to projects
-          </button>
-          <div className="grid grid-cols-2 gap-6" style={{ height: "60vh" }}>
-            <MemoryGraph entries={entries} />
-            <ChatPanel slug={selected} />
-          </div>
-        </div>
-      )}
-    </div>
+    <SidebarProvider>
+      <AppSidebar
+        projects={projects}
+        selected={selected}
+        onSelect={setSelected}
+        onCreated={(slug) => {
+          refreshProjects();
+          setSelected(slug);
+        }}
+      />
+      <SidebarInset>
+        <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
+          <SidebarTrigger />
+          <Separator orientation="vertical" className="h-6" />
+          <h1 className="text-sm font-medium text-muted-foreground">
+            Distributed AI Memory System
+          </h1>
+        </header>
+        <main className="min-h-0 flex-1 overflow-hidden p-4">
+          {selectedProject ? (
+            <ProjectView project={selectedProject} />
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Select a project from the sidebar, or create one.
+            </p>
+          )}
+        </main>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }

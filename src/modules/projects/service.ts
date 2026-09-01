@@ -63,6 +63,15 @@ export class ProjectsService {
       .map((line) => JSON.parse(line) as MemoryEntry);
   }
 
+  /** Returns the raw R2 object for streaming (byte-for-byte memory.jsonl),
+   *  or null if the project or its blob doesn't exist. */
+  async readMemoryRaw(slug: string): Promise<R2ObjectBody | null> {
+    const project = await this.get(slug);
+    if (!project) return null;
+
+    return this.env.DAMS_BUCKET.get(project.r2Key);
+  }
+
   /** Appends one line to the R2 blob and bumps the D1 registry row.
    *  R2 has no native append, so this does a read-modify-write —
    *  fine for single-user traffic, not for concurrent writers. */

@@ -49,4 +49,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ question }),
     }),
+  /** Fetches the raw memory.jsonl bytes for download — not re-serialized JSON. */
+  downloadMemoryRaw: async (slug: string): Promise<Blob> => {
+    const response = await fetch(`/api/projects/${slug}/memory/raw`);
+    if (!response.ok) throw new Error(`Failed to fetch raw memory: ${response.status}`);
+    return response.blob();
+  },
 };

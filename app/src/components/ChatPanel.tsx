@@ -1,5 +1,8 @@
-import { useState } from "react";
-import { api } from "../api";
+import { useState, type FormEvent } from "react";
+import { api } from "@/api";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface Message {
   role: "user" | "assistant";
@@ -12,7 +15,7 @@ export function ChatPanel({ slug }: { slug: string }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     const trimmed = question.trim();
     if (!trimmed || loading) return;
@@ -33,39 +36,40 @@ export function ChatPanel({ slug }: { slug: string }) {
   }
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-y-auto space-y-3 mb-3">
-        {messages.map((m, i) => (
-          <div
-            key={i}
-            className={m.role === "user" ? "text-right" : "text-left"}
-          >
-            <span
-              className={`inline-block px-3 py-2 rounded-lg text-sm ${
-                m.role === "user" ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-900"
-              }`}
-            >
-              {m.text}
-            </span>
-          </div>
-        ))}
-        {loading && <p className="text-sm text-gray-400">Thinking…</p>}
-        {error && <p className="text-sm text-red-500">{error}</p>}
-      </div>
+    <div className="flex h-full flex-col gap-3">
+      <ScrollArea className="min-h-0 flex-1 rounded-md border">
+        <div className="flex flex-col gap-3 p-4">
+          {messages.length === 0 && (
+            <p className="text-sm text-muted-foreground">
+              Ask this project's memory something to get started.
+            </p>
+          )}
+          {messages.map((m, i) => (
+            <div key={i} className={m.role === "user" ? "text-right" : "text-left"}>
+              <span
+                className={`inline-block max-w-[85%] rounded-lg px-3 py-2 text-sm ${
+                  m.role === "user"
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted text-foreground"
+                }`}
+              >
+                {m.text}
+              </span>
+            </div>
+          ))}
+          {loading && <p className="text-sm text-muted-foreground">Thinking…</p>}
+          {error && <p className="text-sm text-destructive">{error}</p>}
+        </div>
+      </ScrollArea>
       <form onSubmit={handleSubmit} className="flex gap-2">
-        <input
+        <Input
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
           placeholder="Ask this project's memory something…"
-          className="flex-1 border rounded px-3 py-2 text-sm"
         />
-        <button
-          type="submit"
-          disabled={loading}
-          className="bg-indigo-600 text-white px-4 py-2 rounded text-sm disabled:opacity-50"
-        >
+        <Button type="submit" disabled={loading}>
           Ask
-        </button>
+        </Button>
       </form>
     </div>
   );
