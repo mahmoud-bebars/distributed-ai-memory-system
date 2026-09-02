@@ -71,7 +71,7 @@ export function ProjectView({ project }: { project: Project }) {
           <EntriesTable entries={entries} />
         </TabsContent>
         <TabsContent value="chat" className="min-h-0 flex-1">
-          <ChatPanel slug={project.slug} />
+          <ChatPanel slug={project.slug} entryCount={entries.length} />
         </TabsContent>
       </Tabs>
     </div>

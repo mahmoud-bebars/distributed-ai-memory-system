@@ -16,6 +16,19 @@ export interface MemoryEntry {
   created_at?: string;
 }
 
+// A memory entry the model reports it drew on to answer — not a retrieval
+// result, a citation (see src/modules/chat/service.ts's extractSources).
+export interface ChatSource {
+  id: string;
+  type: MemoryEntry["type"];
+  summary: string;
+}
+
+export interface ChatResponse {
+  answer: string;
+  sources: ChatSource[];
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, {
     headers: { "content-type": "application/json" },
@@ -45,7 +58,7 @@ export const api = {
     }),
   getMemory: (slug: string) => request<MemoryEntry[]>(`/projects/${slug}/memory`),
   askChat: (slug: string, question: string) =>
-    request<{ answer: string }>(`/projects/${slug}/chat`, {
+    request<ChatResponse>(`/projects/${slug}/chat`, {
       method: "POST",
       body: JSON.stringify({ question }),
     }),

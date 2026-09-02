@@ -66,6 +66,12 @@ export function relationLabel(entry: MemoryEntry): string | undefined {
   return typeof label === "string" ? label : undefined;
 }
 
+export const TYPE_BADGE_VARIANT: Record<MemoryEntry["type"], "default" | "secondary" | "outline"> = {
+  entity: "default",
+  relation: "secondary",
+  observation: "outline",
+};
+
 /** Last-write-wins projection of entities: dedupe by `content.name`,
  *  keeping the last occurrence in file order as current. Mirrors
  *  ProjectsService.currentEntities on the backend — this is a read-side

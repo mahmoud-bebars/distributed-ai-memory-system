@@ -20,15 +20,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { categoryOf, currentEntities, observationText, relationLabel } from "@/lib/memory";
+import {
+  categoryOf,
+  currentEntities,
+  observationText,
+  relationLabel,
+  TYPE_BADGE_VARIANT,
+} from "@/lib/memory";
 
 type TypeFilter = "all" | MemoryEntry["type"];
-
-const TYPE_BADGE_VARIANT: Record<MemoryEntry["type"], "default" | "secondary" | "outline"> = {
-  entity: "default",
-  relation: "secondary",
-  observation: "outline",
-};
 
 function jsonPreview(entry: MemoryEntry): string {
   const text = JSON.stringify(entry.content);
