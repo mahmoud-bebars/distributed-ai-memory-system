@@ -14,6 +14,42 @@ import { projectShareRoutes, publicShareRoutes } from "./modules/shares";
 // and the UI are deliberately NOT behind OAuth.
 const app = new Hono<{ Bindings: Bindings }>();
 
+// Stopgap host guard for mcp.mahmoudbebars.dev.
+//
+// That hostname is supposed to be scoped by a Cloudflare Access application
+// to just the paths listed below (a dashboard setting — see CLAUDE.md's
+// "Shareable read-only links" section). As of 2026-09-08 it turned out that
+// application either doesn't exist or isn't actually restricting anything:
+// the full REST API (reads *and* writes) was reachable there completely
+// unauthenticated. This middleware enforces the same allow-list in code as a
+// belt-and-suspenders measure so a misconfigured or missing Access policy on
+// that hostname can't expose the rest of the app. It is NOT a substitute for
+// fixing the Access application — Access still protects memory.mahmoudbebars.dev,
+// and gates /mcp itself via OAuthProvider below regardless of hostname.
+const MCP_HOSTNAME = "mcp.mahmoudbebars.dev";
+const MCP_HOSTNAME_EXACT_PATHS = new Set(["/mcp", "/authorize", "/token", "/register", "/callback"]);
+const MCP_HOSTNAME_PATH_PREFIXES = ["/.well-known/", "/share/", "/api/share/", "/assets/"];
+
+function isAllowedOnMcpHostname(pathname: string): boolean {
+  return (
+    MCP_HOSTNAME_EXACT_PATHS.has(pathname) ||
+    MCP_HOSTNAME_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix))
+  );
+}
+
+app.use("*", async (c, next) => {
+  // The `Host` header, not `new URL(c.req.url).hostname` — under wrangler
+  // dev/Miniflare the request URL always reflects the local bind address
+  // regardless of what a client sends as Host, so checking the header
+  // directly is both what a real Workers Custom Domain routes on and the
+  // only thing that's actually testable locally.
+  const host = c.req.header("host");
+  if (host === MCP_HOSTNAME && !isAllowedOnMcpHostname(new URL(c.req.url).pathname)) {
+    return c.notFound();
+  }
+  return next();
+});
+
 app.get("/api", (c) => c.json({ service: "distributed-ai-memory-system", status: "ok" }));
 app.route("/api/projects", projectsRoutes);
 app.route("/api/projects", chatRoutes);
