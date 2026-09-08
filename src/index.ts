@@ -5,6 +5,7 @@ import { githubAuthRoutes } from "./modules/auth";
 import { chatRoutes } from "./modules/chat";
 import { mcpHandler } from "./modules/mcp";
 import { projectsRoutes } from "./modules/projects";
+import { projectShareRoutes, publicShareRoutes } from "./modules/shares";
 
 // Everything that isn't the token-gated /mcp route: the REST API, the GitHub
 // OAuth browser flow (/authorize, /callback), and the static frontend. This
@@ -16,6 +17,15 @@ const app = new Hono<{ Bindings: Bindings }>();
 app.get("/api", (c) => c.json({ service: "distributed-ai-memory-system", status: "ok" }));
 app.route("/api/projects", projectsRoutes);
 app.route("/api/projects", chatRoutes);
+app.route("/api/projects", projectShareRoutes);
+
+// Public, token-authed read-only endpoint for share links. Reachable on
+// memory.mahmoudbebars.dev too, but recipients are meant to hit it via
+// mcp.mahmoudbebars.dev/share/:token — the one hostname whose Cloudflare
+// Access application is configured to bypass auth for /share/* and
+// /api/share/* (a dashboard setting, not something this Worker enforces —
+// see CLAUDE.md's share-link notes).
+app.route("/api/share", publicShareRoutes);
 
 // GitHub OAuth endpoints for the /mcp flow. Must be registered before the
 // asset catch-all below, or the wildcard would swallow them.

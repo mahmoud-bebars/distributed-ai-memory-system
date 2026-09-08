@@ -18,3 +18,19 @@ export const projects = sqliteTable("projects", {
 
 export type ProjectRow = typeof projects.$inferSelect;
 export type NewProjectRow = typeof projects.$inferInsert;
+
+// One active share token per project — creating a new one replaces the old
+// (upsert on `slug`, the PK), which is how "regenerate" and "revoke + reissue"
+// both work. A separate explicit revoke just deletes the row.
+export const projectShares = sqliteTable("project_shares", {
+  slug: text("slug")
+    .primaryKey()
+    .references(() => projects.slug),
+  token: text("token").notNull().unique(),
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
+});
+
+export type ProjectShareRow = typeof projectShares.$inferSelect;
+export type NewProjectShareRow = typeof projectShares.$inferInsert;

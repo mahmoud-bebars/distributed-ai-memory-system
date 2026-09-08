@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { Project } from "@/api";
 import { CreateProjectDialog } from "@/components/CreateProjectDialog";
+import { Button } from "@/components/ui/button";
 import {
   Sidebar,
   SidebarContent,
@@ -13,18 +14,22 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import { Brain } from "lucide-react";
+import { Brain, BookOpen } from "lucide-react";
 
 export function AppSidebar({
   projects,
   selected,
   onSelect,
   onCreated,
+  onGuide,
+  guideActive,
 }: {
   projects: Project[];
   selected: string | null;
   onSelect: (slug: string) => void;
   onCreated: (slug: string) => void;
+  onGuide: () => void;
+  guideActive: boolean;
 }) {
   const [query, setQuery] = useState("");
 
@@ -59,7 +64,7 @@ export function AppSidebar({
                 filtered.map((project) => (
                   <SidebarMenuItem key={project.slug}>
                     <SidebarMenuButton
-                      isActive={project.slug === selected}
+                      isActive={!guideActive && project.slug === selected}
                       onClick={() => onSelect(project.slug)}
                       className="h-auto flex-col items-start gap-0.5 py-2"
                     >
@@ -75,7 +80,16 @@ export function AppSidebar({
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter className="p-3">
+      <SidebarFooter className="gap-2 p-3">
+        <Button
+          variant={guideActive ? "secondary" : "ghost"}
+          size="sm"
+          className="w-full justify-start gap-2"
+          onClick={onGuide}
+        >
+          <BookOpen className="size-4" />
+          Guide
+        </Button>
         <CreateProjectDialog onCreated={onCreated} />
       </SidebarFooter>
     </Sidebar>

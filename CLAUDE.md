@@ -88,6 +88,44 @@
   `defaultHandler`; `apiRoute` is `/mcp` alone. Never widen `apiRoute` to
   cover `/api/*` or the assets — those stay unauthenticated by design.
 
+## Shareable read-only links
+
+- `src/modules/shares` (4-file pattern) owns a project's one active share
+  link: `SharesService.create` upserts a `crypto.randomUUID()` token into
+  the `project_shares` D1 table (slug PK — a new token replaces the old
+  one, so "regenerate" is just calling create again), `.revoke` deletes
+  the row, `.resolveProjectByToken` is the public lookup path.
+- Two route groups, both mounted in `src/index.ts`: `projectShareRoutes`
+  (`GET`/`POST`/`DELETE /api/projects/:slug/share`, authenticated the same
+  loose way the rest of `/api/*` is) and `publicShareRoutes`
+  (`GET /api/share/:token/memory`, deliberately unauthenticated — the
+  token *is* the auth). An unknown or missing token always 404s with a
+  generic body; never branch differently for "token doesn't exist" vs.
+  any other failure, so a guess can't learn anything from the response.
+- `shareUrl()` in `shares/service.ts` hardcodes the share host as
+  `mcp.mahmoudbebars.dev` — that's the one custom domain (see
+  `wrangler.toml`'s `routes`) deliberately left outside Cloudflare Access,
+  because a share recipient has no Access login to give. **The Access
+  application for that hostname is configured in the Cloudflare
+  dashboard, not in this repo** — it bypasses auth only for
+  `/mcp`, `/.well-known/*`, `/authorize`, `/token`, `/register`,
+  `/callback`, and now needs `/share/*` and `/api/share/*` added to that
+  same bypass list by hand. No amount of Worker code changes this; the
+  Access check happens at Cloudflare's edge before a request ever reaches
+  this Worker.
+- `wrangler.toml`'s `[assets]` sets
+  `not_found_handling = "single-page-application"` specifically so a cold
+  page load of `/share/:token` (a client-side-only route, no matching
+  static file) falls back to `index.html` instead of 404ing.
+- Frontend: `app/src/main.tsx` does a plain path check
+  (`/^\/share\/([^/]+)/`) — no router library — and renders
+  `ShareView` instead of `App` when it matches. `ShareView` reuses
+  `MemoryGraph`/`EntriesTable` as-is (both are already read-only) but
+  fetches from `api.getShareMemory(token)` and renders no sidebar, no
+  Chat tab, no Export, no create-project form. The authenticated app gets
+  a `ShareDialog` (per-project "Share" button) for generating/copying/
+  revoking the link instead.
+
 ## Frontend conventions (shadcn/ui)
 
 - `app/` uses shadcn/ui (CLI-managed, `radix-nova` preset) on top of
@@ -106,8 +144,16 @@
   so new files should follow that convention too.
 - Layout is sidebar + tabs, not the old list/detail toggle: `AppSidebar`
   (project switcher) wraps `SidebarProvider`/`SidebarInset`, and
-  `ProjectView` renders `Tabs` (Graph / Entries / Chat) plus the Export
-  dropdown, per project.
+  `ProjectView` renders `Tabs` (Graph / Entries / Chat / Prompts) plus the
+  Share and Export controls, per project.
+- Guide and prompt-template content lives in the app itself, not this
+  repo's docs: `app/src/components/GuidePage.tsx` (linked from the
+  sidebar, next to "New project") documents the MCP connect command, the
+  `/mcp` auth flow, and the actual tool list — kept in sync **by hand**
+  with `src/modules/mcp/service.ts`'s `registerTool` calls, since there's
+  no build-time link between them. `app/src/lib/prompts.ts` holds the
+  seed/sync prompt templates (`{PROJECT_SLUG}` substituted per project),
+  rendered in `ProjectView`'s Prompts tab via `PromptsPanel`.
 
 ## What's deliberately not built yet
 
@@ -122,10 +168,20 @@
 
 ```
 npm run dev                  # Worker dev server
-npm run db:generate          # after editing src/db/schema.ts
+npm run db:generate          # after editing src/db/schema.ts — see note below
 npm run db:migrate:local
 npm run db:migrate:remote
 npm run deploy
 cd app && npm run dev        # frontend dev server (proxies /api to :8787)
 cd app && npm run build      # required before npm run deploy
 ```
+
+`db:generate` (`drizzle-kit generate`) only works cleanly if
+`migrations/meta/` exists and tracks prior migrations. It doesn't here —
+`0001_init.sql` was hand-written, so running `generate` produces a fresh
+"baseline" migration that recreates every table from scratch instead of
+a real diff. When that happens, discard the generated file (and any
+`migrations/meta/` it created) and hand-write the incremental migration
+in the same `CREATE TABLE IF NOT EXISTS` style as the existing ones,
+numbered to follow on (`migrations/0002_project_shares.sql` is the
+example to copy).

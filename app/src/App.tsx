@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, type Project } from "@/api";
 import { AppSidebar } from "@/components/AppSidebar";
+import { GuidePage } from "@/components/GuidePage";
 import { ProjectView } from "@/components/ProjectView";
 import { Separator } from "@/components/ui/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
@@ -8,6 +9,7 @@ import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/s
 export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
+  const [showGuide, setShowGuide] = useState(false);
 
   function refreshProjects() {
     api.listProjects().then(setProjects).catch(() => setProjects([]));
@@ -27,11 +29,17 @@ export default function App() {
       <AppSidebar
         projects={projects}
         selected={selected}
-        onSelect={setSelected}
-        onCreated={(slug) => {
-          refreshProjects();
+        onSelect={(slug) => {
+          setShowGuide(false);
           setSelected(slug);
         }}
+        onCreated={(slug) => {
+          refreshProjects();
+          setShowGuide(false);
+          setSelected(slug);
+        }}
+        onGuide={() => setShowGuide(true)}
+        guideActive={showGuide}
       />
       <SidebarInset>
         <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
@@ -42,7 +50,9 @@ export default function App() {
           </h1>
         </header>
         <main className="min-h-0 flex-1 overflow-hidden p-4">
-          {selectedProject ? (
+          {showGuide ? (
+            <GuidePage />
+          ) : selectedProject ? (
             <ProjectView project={selectedProject} />
           ) : (
             <p className="text-sm text-muted-foreground">

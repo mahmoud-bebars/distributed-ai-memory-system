@@ -29,6 +29,8 @@ export interface ChatResponse {
   sources: ChatSource[];
 }
 
+export type ShareStatus = { active: false } | { active: true; token: string; url: string };
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, {
     headers: { "content-type": "application/json" },
@@ -68,4 +70,12 @@ export const api = {
     if (!response.ok) throw new Error(`Failed to fetch raw memory: ${response.status}`);
     return response.blob();
   },
+  getShareStatus: (slug: string) => request<ShareStatus>(`/projects/${slug}/share`),
+  createShare: (slug: string) =>
+    request<{ token: string; url: string }>(`/projects/${slug}/share`, { method: "POST" }),
+  revokeShare: (slug: string) =>
+    request<{ ok: true }>(`/projects/${slug}/share`, { method: "DELETE" }),
+  /** Public read-only endpoint behind a share token — no auth, same shape
+   *  as the authenticated memory endpoint. */
+  getShareMemory: (token: string) => request<MemoryEntry[]>(`/share/${token}/memory`),
 };

@@ -25,6 +25,10 @@ id = "e6dc5a75983a4b8289c26a76f5b83e84"
 [assets]
 directory = "./app/dist"
 binding = "ASSETS"
+# Needed for /share/:token — it's a client-side-only route (no matching
+# static file), so a direct page load must fall back to index.html and let
+# main.tsx's own path check render ShareView.
+not_found_handling = "single-page-application"
 
 [vars]
 ENVIRONMENT = "development"
