@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, type MemoryEntry } from "@/api";
 import { EntriesTable } from "@/components/EntriesTable";
 import { MemoryGraph } from "@/components/MemoryGraph";
+import { ModeToggle } from "@/components/mode-toggle";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Brain } from "lucide-react";
 
@@ -38,9 +39,10 @@ export function ShareView({ token }: { token: string }) {
     <div className="flex h-dvh flex-col">
       <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
         <Brain className="size-5 shrink-0" />
-        <span className="text-sm font-medium text-muted-foreground">
+        <span className="flex-1 text-sm font-medium text-muted-foreground">
           Shared memory — read-only
         </span>
+        <ModeToggle />
       </header>
       <main className="min-h-0 flex-1 overflow-hidden p-4">
         {state === "loading" && <p className="text-sm text-muted-foreground">Loading…</p>}

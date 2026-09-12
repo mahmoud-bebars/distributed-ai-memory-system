@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api, type Project } from "@/api";
 import { AppSidebar } from "@/components/AppSidebar";
 import { GuidePage } from "@/components/GuidePage";
+import { ModeToggle } from "@/components/mode-toggle";
 import { ProjectView } from "@/components/ProjectView";
 import { Separator } from "@/components/ui/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
@@ -45,9 +46,10 @@ export default function App() {
         <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
           <SidebarTrigger />
           <Separator orientation="vertical" className="h-6" />
-          <h1 className="text-sm font-medium text-muted-foreground">
+          <h1 className="flex-1 text-sm font-medium text-muted-foreground">
             Distributed AI Memory System
           </h1>
+          <ModeToggle />
         </header>
         <main className="min-h-0 flex-1 overflow-hidden p-4">
           {showGuide ? (

@@ -11,6 +11,20 @@
     <link rel="manifest" href="site.webmanifest" />
 
     <title>DAMS</title>
+    <script>
+      (function () {
+        var stored = localStorage.getItem("dams-ui-theme");
+        var theme =
+          stored === "light" || stored === "dark"
+            ? stored
+            : stored === "system"
+              ? window.matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "light"
+              : "dark";
+        document.documentElement.classList.add(theme);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

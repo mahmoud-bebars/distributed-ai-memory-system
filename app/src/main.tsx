@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { ShareView } from "./components/ShareView";
+import { ThemeProvider } from "./components/theme-provider";
 import "./index.css";
 
 // No router library — the app has exactly one URL-addressable route
@@ -11,6 +12,8 @@ const shareMatch = window.location.pathname.match(/^\/share\/([^/]+)/);
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    {shareMatch ? <ShareView token={shareMatch[1]} /> : <App />}
+    <ThemeProvider defaultTheme="dark" storageKey="dams-ui-theme">
+      {shareMatch ? <ShareView token={shareMatch[1]} /> : <App />}
+    </ThemeProvider>
   </React.StrictMode>
 );
