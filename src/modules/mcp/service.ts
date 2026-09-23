@@ -2,8 +2,10 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { CfWorkerJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/cfworker";
 import type { Bindings } from "../../lib/bindings";
 import { ChatService } from "../chat";
+import { DocsService } from "../docs";
 import { ProjectsService } from "../projects";
 import {
+  appendDocInput,
   appendMemoryInput,
   askMemoryInput,
   readMemoryInput,
@@ -41,6 +43,7 @@ const errorResult = (message: string) => ({
 export function buildMemoryMcpServer(env: Bindings): McpServer {
   const projects = new ProjectsService(env);
   const chat = new ChatService(env);
+  const docs = new DocsService(env);
 
   const server = new McpServer(SERVER_INFO, {
     jsonSchemaValidator: new CfWorkerJsonSchemaValidator(),
@@ -95,6 +98,23 @@ export function buildMemoryMcpServer(env: Bindings): McpServer {
         const updates = { ...(fields ?? {}), ...(category !== undefined ? { category } : {}) };
         const entry = await projects.updateEntity(slug, name, updates);
         return jsonResult(entry);
+      } catch (err) {
+        return errorResult(err instanceof Error ? err.message : "Unknown error");
+      }
+    },
+  );
+
+  server.registerTool(
+    "append_doc",
+    {
+      description:
+        "Append content to a project's markdown doc file, stored separately from the memory log under {slug}/docs/{filename}.md. Creates the file if it doesn't exist yet; otherwise appends with a '---' separator and a timestamp heading, matching the project's append-only convention.",
+      inputSchema: appendDocInput,
+    },
+    async ({ slug, filename, content }) => {
+      try {
+        await docs.append(slug, filename, content);
+        return jsonResult({ ok: true });
       } catch (err) {
         return errorResult(err instanceof Error ? err.message : "Unknown error");
       }

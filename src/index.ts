@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import type { Bindings } from "./lib/bindings";
 import { githubAuthRoutes } from "./modules/auth";
 import { chatRoutes } from "./modules/chat";
+import { docsRoutes } from "./modules/docs";
 import { mcpHandler } from "./modules/mcp";
 import { projectsRoutes } from "./modules/projects";
 import { projectShareRoutes, publicShareRoutes } from "./modules/shares";
@@ -54,6 +55,7 @@ app.get("/api", (c) => c.json({ service: "distributed-ai-memory-system", status:
 app.route("/api/projects", projectsRoutes);
 app.route("/api/projects", chatRoutes);
 app.route("/api/projects", projectShareRoutes);
+app.route("/api/projects", docsRoutes);
 
 // Public, token-authed read-only endpoint for share links. Reachable on
 // memory.mahmoudbebars.dev too, but recipients are meant to hit it via

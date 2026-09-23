@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { docFilenameSchema } from "../docs/schema";
 import { entityCategorySchema, memoryEntrySchema, slugSchema } from "../projects/schema";
 
 // MCP tool input schemas.
@@ -23,6 +24,12 @@ export const appendMemoryInput = {
 export const askMemoryInput = {
   slug: slugSchema,
   question: z.string().min(1).max(4000),
+};
+
+export const appendDocInput = {
+  slug: slugSchema,
+  filename: docFilenameSchema,
+  content: z.string().min(1).max(100_000),
 };
 
 export const updateEntityInput = {
