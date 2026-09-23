@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { docFilenameSchema } from "../docs/schema";
+import { deleteDocSchema, docFilenameSchema, updateDocSchema } from "../docs/schema";
 import { entityCategorySchema, memoryEntrySchema, slugSchema } from "../projects/schema";
 
 // MCP tool input schemas.
@@ -30,6 +30,21 @@ export const appendDocInput = {
   slug: slugSchema,
   filename: docFilenameSchema,
   content: z.string().min(1).max(100_000),
+};
+
+// Reuse docs/schema's canonical shapes via `.shape` rather than redeclaring
+// filename/content here — the same updateDocSchema/deleteDocSchema objects
+// are also handed straight to zod-to-json-schema for the in-chat Anthropic
+// tool definitions (see chat/service.ts), so there's exactly one place that
+// defines what these two mutations take as input.
+export const updateDocInput = {
+  slug: slugSchema,
+  ...updateDocSchema.shape,
+};
+
+export const deleteDocInput = {
+  slug: slugSchema,
+  ...deleteDocSchema.shape,
 };
 
 export const updateEntityInput = {

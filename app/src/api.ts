@@ -24,9 +24,18 @@ export interface ChatSource {
   summary: string;
 }
 
+// A mutating doc edit the model proposed mid-conversation but did NOT
+// execute — see src/modules/chat/service.ts's extractProposedAction.
+// ChatPanel renders this as an Approve/Reject card; only Approve calls the
+// real doc routes below.
+export type ProposedAction =
+  | { tool: "update_doc"; input: { filename: string; content: string } }
+  | { tool: "delete_doc"; input: { filename: string } };
+
 export interface ChatResponse {
   answer: string;
   sources: ChatSource[];
+  proposedAction?: ProposedAction;
 }
 
 export type ShareStatus = { active: false } | { active: true; token: string; url: string };
@@ -70,6 +79,17 @@ export const api = {
     if (!response.ok) throw new Error(`Failed to fetch raw memory: ${response.status}`);
     return response.blob();
   },
+  /** Full-overwrite replace — the Approve action for a proposed update_doc
+   *  edit calls this (PUT), never the append-only POST above. */
+  updateDoc: (slug: string, filename: string, content: string) =>
+    request<{ ok: true }>(`/projects/${slug}/docs/${encodeURIComponent(filename)}`, {
+      method: "PUT",
+      body: JSON.stringify({ content }),
+    }),
+  deleteDoc: (slug: string, filename: string) =>
+    request<{ ok: true }>(`/projects/${slug}/docs/${encodeURIComponent(filename)}`, {
+      method: "DELETE",
+    }),
   getShareStatus: (slug: string) => request<ShareStatus>(`/projects/${slug}/share`),
   createShare: (slug: string) =>
     request<{ token: string; url: string }>(`/projects/${slug}/share`, { method: "POST" }),

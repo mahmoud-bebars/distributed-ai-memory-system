@@ -58,4 +58,37 @@ export class DocsService {
     const updatedText = `${existingText}\n\n---\n\n## ${timestamp}\n\n${content}`;
     await this.env.DAMS_BUCKET.put(key, updatedText);
   }
+
+  /** Full-overwrite replace of an existing doc's content — deliberately NOT
+   *  append. memory.jsonl is append-only because multi-device sync needs a
+   *  conflict-free log; a doc is a single editable document a user asked to
+   *  "update", not a revision log, so this replaces it in place. Fails if
+   *  the doc doesn't exist yet, same convention as ProjectsService.updateEntity
+   *  — creation stays append()'s job. */
+  async update(slug: string, filename: string, content: string): Promise<void> {
+    if (!(await this.projects.get(slug))) {
+      throw new Error(`Unknown project: ${slug}`);
+    }
+
+    const key = r2KeyFor(slug, filename);
+    if (!(await this.env.DAMS_BUCKET.head(key))) {
+      throw new Error(`Unknown doc: ${filename} (in project ${slug})`);
+    }
+
+    await this.env.DAMS_BUCKET.put(key, content);
+  }
+
+  /** Permanently deletes a doc file. Fails clearly if it doesn't exist. */
+  async delete(slug: string, filename: string): Promise<void> {
+    if (!(await this.projects.get(slug))) {
+      throw new Error(`Unknown project: ${slug}`);
+    }
+
+    const key = r2KeyFor(slug, filename);
+    if (!(await this.env.DAMS_BUCKET.head(key))) {
+      throw new Error(`Unknown doc: ${filename} (in project ${slug})`);
+    }
+
+    await this.env.DAMS_BUCKET.delete(key);
+  }
 }

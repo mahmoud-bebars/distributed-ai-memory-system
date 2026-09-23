@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { DeleteDocInput, UpdateDocInput } from "../docs/schema";
 import type { MemoryEntry } from "../projects/schema";
 
 export const chatRequestSchema = z.object({
@@ -17,7 +18,16 @@ export interface ChatSource {
   summary: string;
 }
 
+// A mutating doc edit the model called as a tool mid-conversation, returned
+// to the frontend unexecuted — ChatService never runs update_doc/delete_doc
+// itself. The frontend renders this as an Approve/Reject card; only an
+// explicit Approve click hits the real PUT/DELETE doc routes.
+export type ProposedAction =
+  | { tool: "update_doc"; input: UpdateDocInput }
+  | { tool: "delete_doc"; input: DeleteDocInput };
+
 export interface ChatResponse {
   answer: string;
   sources: ChatSource[];
+  proposedAction?: ProposedAction;
 }

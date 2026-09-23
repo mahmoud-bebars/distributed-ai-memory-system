@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { api, type ChatSource } from "@/api";
+import { api, type ChatSource, type ProposedAction } from "@/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,10 +7,75 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { renderMarkdown } from "@/lib/markdown";
 import { TYPE_BADGE_VARIANT } from "@/lib/memory";
 
+type ActionStatus = "pending" | "approved" | "rejected" | "error";
+
 interface Message {
   role: "user" | "assistant";
   text: string;
   sources?: ChatSource[];
+  proposedAction?: ProposedAction;
+  actionStatus?: ActionStatus;
+  actionError?: string;
+}
+
+// Renders a mutating doc edit the model proposed but did NOT execute (see
+// src/modules/chat/service.ts) as an explicit Approve/Reject card. Approve
+// is the only path that ever calls the real write/delete route — rejecting,
+// or just not clicking anything, leaves the project untouched.
+function ProposedActionCard({
+  action,
+  status,
+  error,
+  onApprove,
+  onReject,
+}: {
+  action: ProposedAction;
+  status: ActionStatus;
+  error?: string;
+  onApprove: () => void;
+  onReject: () => void;
+}) {
+  return (
+    <div className="mt-1.5 max-w-[85%] rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+      <p className="font-medium">
+        {action.tool === "update_doc" ? "Proposed doc edit" : "Proposed doc deletion"}
+      </p>
+      <p className="mt-1 text-muted-foreground">
+        File: <code className="rounded bg-muted px-1 py-0.5">{action.input.filename}</code>
+      </p>
+      {action.tool === "update_doc" ? (
+        <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 text-xs">
+          {action.input.content}
+        </pre>
+      ) : (
+        <p className="mt-2 text-xs text-destructive">
+          This will permanently delete the file. This cannot be undone.
+        </p>
+      )}
+
+      {status === "pending" && (
+        <div className="mt-2 flex gap-2">
+          <Button type="button" size="sm" onClick={onApprove}>
+            Approve
+          </Button>
+          <Button type="button" size="sm" variant="outline" onClick={onReject}>
+            Reject
+          </Button>
+        </div>
+      )}
+      {status === "approved" && (
+        <p className="mt-2 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+          Applied.
+        </p>
+      )}
+      {status === "rejected" && (
+        <p className="mt-2 text-xs text-muted-foreground">Rejected — no change made.</p>
+      )}
+      {status === "error" && (
+        <p className="mt-2 text-xs text-destructive">Failed to apply: {error}</p>
+      )}
+    </div>
+  );
 }
 
 export function ChatPanel({ slug, entryCount }: { slug: string; entryCount: number }) {
@@ -30,13 +95,53 @@ export function ChatPanel({ slug, entryCount }: { slug: string; entryCount: numb
     setError(null);
 
     try {
-      const { answer, sources } = await api.askChat(slug, trimmed);
-      setMessages((prev) => [...prev, { role: "assistant", text: answer, sources }]);
+      const { answer, sources, proposedAction } = await api.askChat(slug, trimmed);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          text: answer,
+          sources,
+          proposedAction,
+          actionStatus: proposedAction ? "pending" : undefined,
+        },
+      ]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleApprove(index: number, action: ProposedAction) {
+    try {
+      if (action.tool === "update_doc") {
+        await api.updateDoc(slug, action.input.filename, action.input.content);
+      } else {
+        await api.deleteDoc(slug, action.input.filename);
+      }
+      setMessages((prev) =>
+        prev.map((m, i) => (i === index ? { ...m, actionStatus: "approved" } : m)),
+      );
+    } catch (err) {
+      setMessages((prev) =>
+        prev.map((m, i) =>
+          i === index
+            ? {
+                ...m,
+                actionStatus: "error",
+                actionError: err instanceof Error ? err.message : "Something went wrong",
+              }
+            : m,
+        ),
+      );
+    }
+  }
+
+  function handleReject(index: number) {
+    setMessages((prev) =>
+      prev.map((m, i) => (i === index ? { ...m, actionStatus: "rejected" } : m)),
+    );
   }
 
   return (
@@ -50,15 +155,19 @@ export function ChatPanel({ slug, entryCount }: { slug: string; entryCount: numb
           )}
           {messages.map((m, i) => (
             <div key={i} className={m.role === "user" ? "text-right" : "text-left"}>
-              <div
-                className={`inline-block max-w-[85%] rounded-lg px-3 py-2 text-left text-sm ${
-                  m.role === "user"
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-muted text-foreground"
-                }`}
-              >
-                {m.role === "assistant" ? renderMarkdown(m.text) : m.text}
-              </div>
+              {/* A tool-only turn can come back with no text, just a proposed
+                  action — skip the empty bubble rather than render blank chrome. */}
+              {(m.role === "user" || m.text.length > 0) && (
+                <div
+                  className={`inline-block max-w-[85%] rounded-lg px-3 py-2 text-left text-sm ${
+                    m.role === "user"
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-foreground"
+                  }`}
+                >
+                  {m.role === "assistant" ? renderMarkdown(m.text) : m.text}
+                </div>
+              )}
               {m.role === "assistant" && m.sources && m.sources.length > 0 && (
                 <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                   <span className="text-xs text-muted-foreground">
@@ -75,6 +184,15 @@ export function ChatPanel({ slug, entryCount }: { slug: string; entryCount: numb
                     </Badge>
                   ))}
                 </div>
+              )}
+              {m.role === "assistant" && m.proposedAction && m.actionStatus && (
+                <ProposedActionCard
+                  action={m.proposedAction}
+                  status={m.actionStatus}
+                  error={m.actionError}
+                  onApprove={() => handleApprove(i, m.proposedAction!)}
+                  onReject={() => handleReject(i)}
+                />
               )}
             </div>
           ))}

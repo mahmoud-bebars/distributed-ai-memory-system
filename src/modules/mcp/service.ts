@@ -8,9 +8,20 @@ import {
   appendDocInput,
   appendMemoryInput,
   askMemoryInput,
+  deleteDocInput,
   readMemoryInput,
+  updateDocInput,
   updateEntityInput,
 } from "./schema";
+
+// Shared confirm-first instruction for the two destructive doc tools. This
+// is a prompt-level nudge only — MCP has no technical mechanism here to
+// force a calling agent to actually pause and ask; a well-behaved client
+// (Claude Code, etc.) will follow it, but nothing stops a misbehaving one
+// from calling straight through. It is not an approval gate the way the
+// browser chat's proposedAction flow (ChatService.ask) is.
+const CONFIRM_FIRST_NOTICE =
+  "Before calling this, confirm with the developer that they want this specific change made — don't call this on your own initiative, even if it seems like the obvious next step.";
 
 const SERVER_INFO = { name: "distributed-ai-memory-system", version: "0.1.0" } as const;
 
@@ -114,6 +125,39 @@ export function buildMemoryMcpServer(env: Bindings): McpServer {
     async ({ slug, filename, content }) => {
       try {
         await docs.append(slug, filename, content);
+        return jsonResult({ ok: true });
+      } catch (err) {
+        return errorResult(err instanceof Error ? err.message : "Unknown error");
+      }
+    },
+  );
+
+  server.registerTool(
+    "update_doc",
+    {
+      description:
+        `Replace a project doc's entire content (full overwrite, not an append). Fails if no doc with that filename exists yet — use append_doc to create one first. ${CONFIRM_FIRST_NOTICE}`,
+      inputSchema: updateDocInput,
+    },
+    async ({ slug, filename, content }) => {
+      try {
+        await docs.update(slug, filename, content);
+        return jsonResult({ ok: true });
+      } catch (err) {
+        return errorResult(err instanceof Error ? err.message : "Unknown error");
+      }
+    },
+  );
+
+  server.registerTool(
+    "delete_doc",
+    {
+      description: `Permanently delete a project doc file. This cannot be undone. ${CONFIRM_FIRST_NOTICE}`,
+      inputSchema: deleteDocInput,
+    },
+    async ({ slug, filename }) => {
+      try {
+        await docs.delete(slug, filename);
         return jsonResult({ ok: true });
       } catch (err) {
         return errorResult(err instanceof Error ? err.message : "Unknown error");
