@@ -2,9 +2,16 @@
 
 Run from the repo root, in order.
 
-1. Get your D1 database id and paste it into wrangler.toml:
+0. wrangler.toml is git-ignored (it holds this account's real D1/KV resource
+   ids) — copy the template first:
+   cp wrangler.toml.example wrangler.toml
+
+1. Get your D1 database id and your KV namespace id, and paste them into
+   wrangler.toml:
    wrangler d1 info dams_db
    # copy the uuid into database_id in wrangler.toml
+   wrangler kv namespace create OAUTH_KV
+   # copy the id into the OAUTH_KV [[kv_namespaces]] block in wrangler.toml
 
 2. Apply the schema to the remote database (not just --local this time):
    npm run db:migrate:remote

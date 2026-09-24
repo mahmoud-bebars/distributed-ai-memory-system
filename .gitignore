@@ -3,6 +3,10 @@ notes.txt
 # Local secrets for `wrangler dev` — never commit
 .dev.vars
 
+# Real Worker config, incl. D1/KV resource ids for this account — never
+# commit. Copy wrangler.toml.example to wrangler.toml and fill in your own.
+wrangler.toml
+
 # Dependencies & build/runtime artifacts
 node_modules/
 app/node_modules/

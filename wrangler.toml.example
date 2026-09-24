@@ -12,7 +12,7 @@ routes = [
 [[d1_databases]]
 binding = "DAMS_DB"
 database_name = "dams_db"
-database_id = "96ba75ef-db20-40af-86db-f1e630f818a8"
+database_id = "<YOUR_D1_DATABASE_ID>"          # wrangler d1 info dams_db
 
 [[r2_buckets]]
 binding = "DAMS_BUCKET"
@@ -20,7 +20,7 @@ bucket_name = "dmas"
 
 [[kv_namespaces]]
 binding = "OAUTH_KV"
-id = "e6dc5a75983a4b8289c26a76f5b83e84"
+id = "<YOUR_KV_NAMESPACE_ID>"                  # wrangler kv namespace create OAUTH_KV
 
 [assets]
 directory = "./app/dist"
@@ -47,4 +47,3 @@ ALLOWED_GITHUB_USER = ""
 #                                              # consent/approval cookies
 #
 # OAUTH_KV (above) backs the OAuthProvider's grant/state storage.
-

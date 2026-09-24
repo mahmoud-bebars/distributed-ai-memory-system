@@ -20,6 +20,7 @@ Deployed at `memory.mahmoudbebars.dev`.
 ## Local development
 
 ```
+cp wrangler.toml.example wrangler.toml   # fill in your own D1/KV ids — see DEPLOY.md
 npm install
 npm run db:migrate:local
 npm run dev            # Worker on :8787
