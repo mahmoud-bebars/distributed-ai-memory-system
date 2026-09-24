@@ -186,14 +186,34 @@ wouldn't rerun.
 
 ## Layout: center graph panel + right Chat/Docs panel
 
-`ProjectView.tsx` is a CSS grid, not stacked tabs: `grid-cols-[1fr_400px]`
-on `lg+`, collapsing to a single column with explicit row heights
-(`grid-rows-[minmax(320px,1fr)_420px]`) below that. **Use a sized grid
-here, not `flex-col` with `flex-1` children** — the panels' own internal
-`ScrollArea`s need a definite ancestor height to size against; an
-unconstrained flex-column stack lets them collapse to their content's
-minimum height instead of filling the available space. This bit before —
-don't reintroduce it.
+`ProjectView.tsx` branches on `useIsMobile()` for how the two panels share
+space, not stacked tabs:
+
+- **Desktop (`!isMobile`, and not fullscreen)** — shadcn's `resizable.tsx`
+  (`ResizablePanelGroup`/`ResizablePanel`/`ResizableHandle`, wrapping
+  `react-resizable-panels`) in `orientation="horizontal"`, default split
+  65/35, center panel `minSize={35}`, right panel `minSize={22}` and
+  `collapsible` with `collapsedSize={0}`. The "hide side panel" button in
+  the center panel's header (`PanelRightClose`/`PanelRightOpen`) drives a
+  `panelRef` (`PanelImperativeHandle.collapse()`/`.expand()`) rather than
+  its own boolean — dragging the handle all the way shut and clicking the
+  button both need to leave the panel in the same collapsed state, so
+  there's one source of truth (the panel itself) and the button's icon
+  just mirrors it via `onResize`.
+- **Mobile (`isMobile`)** — a CSS grid instead, `grid-rows-[minmax(320px,1fr)_420px]`
+  stacking the two panels vertically. Dragging a horizontal split isn't a
+  good interaction on a narrow touch screen, so resizing isn't offered
+  there at all — this is a deliberate, not a missing, difference from
+  desktop.
+
+In both cases, **give each panel's own root `div` `h-full flex-1
+min-h-0`** — not just the wrapping grid/group. A `ResizablePanel`'s cross-
+axis stretch (or a grid track's default stretch) only gives the panel
+*itself* a definite height; its child still needs to be told to fill that
+box, or its internal `ScrollArea`s collapse to their content's minimum
+height instead of the space actually available. This bit before, twice
+(once for the mobile grid, once for the fullscreen overlay) — don't
+reintroduce it a third time for whatever layout comes next.
 
 - **Center panel** — its own header (icon + "Memory Graph" title/caption),
   a pill `Tabs` (`variant="default"`, the segmented-control look) for
@@ -203,16 +223,42 @@ don't reintroduce it.
   seed/sync prompt panel — both were top-level tabs before this redesign
   and are now pages of the center panel instead, alongside Graph.
 - **Right panel** — underline `Tabs` (`variant="line"`) for Chat / Docs,
-  Chat first and default. `DocsPanel` gets a `compact` prop here that
-  forces its mobile (sheet-based file picker) layout regardless of
-  viewport width, because the right panel is fixed at 400px — too narrow
-  for its desktop two-column layout.
+  Chat first and default.
 
 Use the pill (`default`) `TabsList` variant for switching between *views
 of the same subject* (Graph/List/Prompts are all views into one project's
 memory); use the line/underline variant for switching between *different
 kinds of panel content* (Chat vs. Docs). That's the distinction to keep if
 a third panel gets added later.
+
+## Docs: browse list + fullscreen reader/editor
+
+`DocsPanel` is two mutually exclusive screens, not a side-by-side
+list+content split (that needed ~600px+ to not feel cramped, and the
+right panel is 400px by default): a scrollable file list, and — once a
+file is picked — the same `fixed inset-4 z-50` fullscreen-overlay pattern
+the graph panel uses, with its own Edit/Delete/Save/Cancel controls and an
+append box. Picking a file jumps straight to fullscreen (`loadFile` sets
+both `selected` and `expanded`); a `Minimize2` "back" button or `Escape`
+returns to the list, confirming first if there are unsaved edits. This
+replaced an earlier version that force-selected the mobile (sheet-based)
+file picker via a `compact` prop whenever the panel was narrow — fullscreen
+solves the same "not enough room" problem more directly and dropped that
+prop and its device-width branching entirely.
+
+`DocsPanel` takes one `source: { kind: "project"; slug } | { kind: "share"; token }`
+prop instead of a bare `slug`. `kind: "share"` is what `ShareView` (the
+public `/share/:token` page) passes, and it hides every mutating control
+(Edit, Delete, the append box, "New doc") — but that's a UI convenience,
+not the actual boundary: the backend's public share-docs routes
+(`GET /api/share/:token/docs` and `.../docs/:filename`, in
+`src/modules/shares/routes.ts`) only implement `GET`, so there is no
+append/update/delete endpoint for a share token to call even if a future
+UI change forgot to hide those buttons. Keep it that way — don't add
+mutating routes under `/api/share/*` "for convenience" without deliberately
+revisiting whether share links should stay read-only (they should: the
+token is the only auth a recipient has, and it's handed out far more
+loosely than a login).
 
 ## Sidebar (`AppSidebar.tsx`)
 
@@ -290,7 +336,7 @@ Panel/dialog open-close animation is unchanged shadcn/Radix defaults
 | `⌘/` or `?` | Open the shortcuts help dialog | `App.tsx`'s `GlobalShortcuts`, `ShortcutsHelp.tsx` |
 | `G` then `L` | Toggle the center panel between Graph and List | `ProjectView.tsx`, via `hooks/use-key-sequence.ts` |
 | `⌘⏎` / `Ctrl+⏎` | Send the current chat message | `ChatPanel.tsx`'s `handleKeyDown` (plain `Enter` already submits too — this is the explicit extra binding) |
-| `Esc` | Close the fullscreen graph panel, dialogs, sheets | `ProjectView.tsx` for fullscreen; dialogs/sheets get it free from Radix |
+| `Esc` | Close the fullscreen graph panel or doc reader, dialogs, sheets | `ProjectView.tsx` / `DocsPanel.tsx` for their own fullscreen overlays; dialogs/sheets get it free from Radix |
 
 `use-key-sequence.ts`'s `useKeySequence` is the general primitive for
 `G`-then-`L`-style chords: it ignores keystrokes while an

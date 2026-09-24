@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { PanelImperativeHandle } from "react-resizable-panels";
 import { api, type MemoryEntry, type Project } from "@/api";
 import { ChatPanel } from "@/components/ChatPanel";
 import { DocsPanel } from "@/components/DocsPanel";
@@ -13,11 +14,22 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { useKeySequence } from "@/hooks/use-key-sequence";
 import { downloadBlob, downloadJson } from "@/lib/export";
-import { cn } from "@/lib/utils";
-import { Download, MessageCircle, Minimize2, Network, Maximize2, RefreshCw, ScrollText } from "lucide-react";
+import {
+  Download,
+  MessageCircle,
+  Minimize2,
+  Network,
+  Maximize2,
+  PanelRightClose,
+  PanelRightOpen,
+  RefreshCw,
+  ScrollText,
+} from "lucide-react";
 
 type CenterTab = "graph" | "list" | "prompts";
 type RightTab = "chat" | "docs";
@@ -31,6 +43,9 @@ export function ProjectView({ project }: { project: Project }) {
   const [rightTab, setRightTab] = useState<RightTab>("chat");
   const [expanded, setExpanded] = useState(false);
   const [focusRequest, setFocusRequest] = useState<GraphFocusRequest | null>(null);
+  const [rightCollapsed, setRightCollapsed] = useState(false);
+  const rightPanelRef = useRef<PanelImperativeHandle>(null);
+  const isMobile = useIsMobile();
 
   const fetchMemory = useCallback(() => {
     setLoading(true);
@@ -85,6 +100,13 @@ export function ProjectView({ project }: { project: Project }) {
     setFocusRequest({ id: name, nonce: Date.now() });
   }
 
+  function toggleRightPanel() {
+    const panel = rightPanelRef.current;
+    if (!panel) return;
+    if (panel.isCollapsed()) panel.expand();
+    else panel.collapse();
+  }
+
   async function handleRawExport() {
     try {
       const blob = await api.downloadMemoryRaw(project.slug);
@@ -99,7 +121,7 @@ export function ProjectView({ project }: { project: Project }) {
   }
 
   const centerPanel = (
-    <div className="flex min-h-0 min-w-0 flex-col gap-3 rounded-2xl border border-border bg-card/40 p-3">
+    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col gap-3 rounded-2xl border border-border bg-card/40 p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <span
@@ -123,6 +145,20 @@ export function ProjectView({ project }: { project: Project }) {
               <TabsTrigger value="prompts">Prompts</TabsTrigger>
             </TabsList>
           </Tabs>
+          {!isMobile && !expanded && (
+            <Button
+              variant="outline"
+              size="icon-sm"
+              title={rightCollapsed ? "Show side panel" : "Hide side panel"}
+              onClick={toggleRightPanel}
+            >
+              {rightCollapsed ? (
+                <PanelRightOpen className="size-4" />
+              ) : (
+                <PanelRightClose className="size-4" />
+              )}
+            </Button>
+          )}
           <Button
             variant="outline"
             size="icon-sm"
@@ -147,7 +183,7 @@ export function ProjectView({ project }: { project: Project }) {
   );
 
   const rightPanel = (
-    <div className="flex min-h-0 min-w-0 flex-col gap-3 rounded-2xl border border-border bg-card/40 p-3">
+    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col gap-3 rounded-2xl border border-border bg-card/40 p-3">
       <Tabs
         value={rightTab}
         onValueChange={(v) => setRightTab(v as RightTab)}
@@ -172,7 +208,7 @@ export function ProjectView({ project }: { project: Project }) {
           />
         </TabsContent>
         <TabsContent value="docs" className="min-h-0 flex-1">
-          <DocsPanel slug={project.slug} compact />
+          <DocsPanel source={{ kind: "project", slug: project.slug }} />
         </TabsContent>
       </Tabs>
     </div>
@@ -224,16 +260,34 @@ export function ProjectView({ project }: { project: Project }) {
         <div className="fixed inset-4 z-50 flex flex-col gap-3 rounded-2xl bg-background p-3 shadow-2xl ring-1 ring-border">
           {centerPanel}
         </div>
-      ) : (
-        <div
-          className={cn(
-            "grid min-h-0 flex-1 grid-rows-[minmax(320px,1fr)_420px] gap-4",
-            "lg:grid-cols-[1fr_400px] lg:grid-rows-1"
-          )}
-        >
+      ) : isMobile ? (
+        <div className="grid min-h-0 flex-1 grid-rows-[minmax(320px,1fr)_420px] gap-4">
           {centerPanel}
           {rightPanel}
         </div>
+      ) : (
+        // Desktop only — dragging the handle resizes both panels, and the
+        // "hide side panel" button in the center header collapses/expands
+        // the right one via rightPanelRef. Mobile keeps the fixed-row grid
+        // above: dragging a horizontal split on a narrow touch screen isn't
+        // a good interaction, so it isn't offered there.
+        <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
+          <ResizablePanel id="center-panel" defaultSize={65} minSize={35}>
+            {centerPanel}
+          </ResizablePanel>
+          <ResizableHandle withHandle className="mx-2" />
+          <ResizablePanel
+            id="right-panel"
+            defaultSize={35}
+            minSize={22}
+            collapsible
+            collapsedSize={0}
+            panelRef={rightPanelRef}
+            onResize={(size) => setRightCollapsed(size.asPercentage < 1)}
+          >
+            {rightPanel}
+          </ResizablePanel>
+        </ResizablePanelGroup>
       )}
     </div>
   );

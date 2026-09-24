@@ -72,8 +72,8 @@ export function ShareDialog({ slug }: { slug: string }) {
         <DialogHeader>
           <DialogTitle>Share this project</DialogTitle>
           <DialogDescription>
-            Anyone with the link can view this project's Graph and Entries tabs, read-only — no
-            login, no other projects visible, nothing editable.
+            Anyone with the link can view this project's Graph, Entries, and Docs tabs, read-only
+            — no login, no other projects visible, nothing editable or deletable.
           </DialogDescription>
         </DialogHeader>
 

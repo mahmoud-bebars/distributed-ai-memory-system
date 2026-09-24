@@ -111,4 +111,14 @@ export const api = {
   /** Public read-only endpoint behind a share token — no auth, same shape
    *  as the authenticated memory endpoint. */
   getShareMemory: (token: string) => request<MemoryEntry[]>(`/share/${token}/memory`),
+  /** Public read-only doc listing/content behind a share token — mirrors
+   *  getDocs/getDoc above, but there is no share-side append/update/delete:
+   *  the backend only exposes GET on these, so a share link can't mutate
+   *  docs regardless of what the frontend renders. */
+  getShareDocs: (token: string) => request<{ filenames: string[] }>(`/share/${token}/docs`),
+  getShareDoc: async (token: string, filename: string): Promise<string> => {
+    const response = await fetch(`/api/share/${token}/docs/${encodeURIComponent(filename)}`);
+    if (!response.ok) throw new Error(`Failed to fetch doc: ${response.status}`);
+    return response.text();
+  },
 };

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type MemoryEntry } from "@/api";
+import { DocsPanel } from "@/components/DocsPanel";
 import { EntriesTable } from "@/components/EntriesTable";
 import { MemoryGraph } from "@/components/MemoryGraph";
 import { ModeToggle } from "@/components/mode-toggle";
@@ -10,7 +11,11 @@ type LoadState = "loading" | "ok" | "not-found" | "error";
 
 /** The minimal, read-only page served at /share/:token. No sidebar, no
  *  Chat tab, no Export, no create-project form — just this one project's
- *  Graph and Entries, fetched from the public token-authed endpoint. */
+ *  Graph, Entries, and Docs, fetched from the public token-authed
+ *  endpoints. DocsPanel's `source: { kind: "share" }` hides every mutating
+ *  control (edit/delete/append/new) — the backend also only exposes GET on
+ *  the share-token doc routes, so this is a UI convenience on top of a real
+ *  server-side restriction, not the only thing enforcing it. */
 export function ShareView({ token }: { token: string }) {
   const [entries, setEntries] = useState<MemoryEntry[]>([]);
   const [state, setState] = useState<LoadState>("loading");
@@ -64,12 +69,16 @@ export function ShareView({ token }: { token: string }) {
             <TabsList>
               <TabsTrigger value="graph">Graph</TabsTrigger>
               <TabsTrigger value="entries">Entries</TabsTrigger>
+              <TabsTrigger value="docs">Docs</TabsTrigger>
             </TabsList>
             <TabsContent value="graph" className="min-h-0 flex-1">
               <MemoryGraph entries={entries} />
             </TabsContent>
             <TabsContent value="entries" className="min-h-0 flex-1">
               <EntriesTable entries={entries} />
+            </TabsContent>
+            <TabsContent value="docs" className="min-h-0 flex-1">
+              <DocsPanel source={{ kind: "share", token }} />
             </TabsContent>
           </Tabs>
         )}

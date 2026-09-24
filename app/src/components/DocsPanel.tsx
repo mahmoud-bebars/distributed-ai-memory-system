@@ -12,19 +12,23 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
-import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
-import { ChevronsUpDown, Pencil, Plus } from "lucide-react";
+import { FileText, Minimize2, Pencil, Plus } from "lucide-react";
 
 type Mode = "preview" | "edit";
 
+/** Where a DocsPanel reads (and, for "project", writes) its files. "share"
+ *  is the public read-only /share/:token view — the backend only exposes
+ *  GET on those routes (see src/modules/shares/routes.ts), so `readOnly`
+ *  below is a UI convenience, not the actual enforcement boundary. */
+export type DocsSource = { kind: "project"; slug: string } | { kind: "share"; token: string };
+
 // Markdown doc files stored separately from memory.jsonl (see
-// src/modules/docs). GitHub-style: a file opens in a rendered, read-only
-// preview; an explicit Edit button switches to a raw textarea, with
-// Save/Cancel to leave it. On narrow screens the file list moves into a
-// bottom sheet instead of a permanent side column.
+// src/modules/docs). Browsing and reading are two distinct screens: a
+// scrollable file list, and — once a file is picked — a fullscreen reader/
+// editor overlay (matching ProjectView's graph fullscreen pattern) so a doc
+// gets real reading room instead of being squeezed into the docked side panel.
 function DocFileList({
   filenames,
   selected,
@@ -45,25 +49,30 @@ function DocFileList({
           type="button"
           onClick={() => onSelect(filename)}
           className={cn(
-            "rounded px-2 py-2 text-left font-mono text-xs hover:bg-muted",
-            selected === filename && "bg-muted font-medium",
+            "glow-hover flex items-center gap-2 rounded-lg px-2 py-2 text-left",
+            selected === filename && "bg-muted"
           )}
+          style={{ "--glow-color": "var(--accent-teal)" } as React.CSSProperties}
         >
-          {filename}
+          <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className={cn("truncate font-mono text-xs", selected === filename && "font-medium")}>
+            {filename}
+          </span>
         </button>
       ))}
     </div>
   );
 }
 
-export function DocsPanel({ slug, compact = false }: { slug: string; compact?: boolean }) {
-  const isMobile = useIsMobile() || compact;
+export function DocsPanel({ source }: { source: DocsSource }) {
+  const readOnly = source.kind === "share";
+  const sourceKey = source.kind === "project" ? source.slug : source.token;
 
   const [filenames, setFilenames] = useState<string[]>([]);
   const [listError, setListError] = useState<string | null>(null);
-  const [mobileListOpen, setMobileListOpen] = useState(false);
 
   const [selected, setSelected] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const [mode, setMode] = useState<Mode>("preview");
   const [content, setContent] = useState("");
   const [originalContent, setOriginalContent] = useState("");
@@ -81,27 +90,31 @@ export function DocsPanel({ slug, compact = false }: { slug: string; compact?: b
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
-  const dirty = content !== originalContent;
+  const dirty = !readOnly && content !== originalContent;
 
   const refreshList = useCallback(() => {
-    return api
-      .getDocs(slug)
+    const request = source.kind === "project" ? api.getDocs(source.slug) : api.getShareDocs(source.token);
+    return request
       .then((r) => setFilenames(r.filenames))
       .catch((err) => setListError(err instanceof Error ? err.message : "Failed to load docs."));
-  }, [slug]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [source.kind, sourceKey]);
 
   useEffect(() => {
     setSelected(null);
+    setExpanded(false);
     refreshList();
   }, [refreshList]);
 
   function loadFile(filename: string) {
     setSelected(filename);
+    setExpanded(true);
     setMode("preview");
     setContentLoading(true);
     setContentError(null);
-    api
-      .getDoc(slug, filename)
+    const request =
+      source.kind === "project" ? api.getDoc(source.slug, filename) : api.getShareDoc(source.token, filename);
+    request
       .then((text) => {
         setContent(text);
         setOriginalContent(text);
@@ -113,8 +126,23 @@ export function DocsPanel({ slug, compact = false }: { slug: string; compact?: b
   function handleSelect(filename: string) {
     if (mode === "edit" && dirty && !window.confirm("Discard unsaved changes?")) return;
     loadFile(filename);
-    setMobileListOpen(false);
   }
+
+  function closeExpanded() {
+    if (mode === "edit" && dirty && !window.confirm("Discard unsaved changes?")) return;
+    setExpanded(false);
+    setMode("preview");
+  }
+
+  useEffect(() => {
+    if (!expanded) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") closeExpanded();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expanded, mode, dirty]);
 
   function handleCancelEdit() {
     setContent(originalContent);
@@ -122,11 +150,11 @@ export function DocsPanel({ slug, compact = false }: { slug: string; compact?: b
   }
 
   async function handleSave() {
-    if (!selected) return;
+    if (!selected || source.kind !== "project") return;
     setSaving(true);
     setContentError(null);
     try {
-      await api.updateDoc(slug, selected, content);
+      await api.updateDoc(source.slug, selected, content);
       setOriginalContent(content);
       setMode("preview");
     } catch (err) {
@@ -137,12 +165,13 @@ export function DocsPanel({ slug, compact = false }: { slug: string; compact?: b
   }
 
   async function handleDelete() {
-    if (!selected) return;
+    if (!selected || source.kind !== "project") return;
     if (!window.confirm(`Delete "${selected}"? This cannot be undone.`)) return;
     setDeleting(true);
     try {
-      await api.deleteDoc(slug, selected);
+      await api.deleteDoc(source.slug, selected);
       setSelected(null);
+      setExpanded(false);
       setContent("");
       setOriginalContent("");
       await refreshList();
@@ -154,13 +183,13 @@ export function DocsPanel({ slug, compact = false }: { slug: string; compact?: b
   }
 
   async function handleAppend() {
-    if (!selected || !appendText.trim()) return;
+    if (!selected || !appendText.trim() || source.kind !== "project") return;
     setAppending(true);
     setContentError(null);
     try {
-      await api.appendDoc(slug, selected, appendText.trim());
+      await api.appendDoc(source.slug, selected, appendText.trim());
       setAppendText("");
-      const text = await api.getDoc(slug, selected);
+      const text = await api.getDoc(source.slug, selected);
       setContent(text);
       setOriginalContent(text);
     } catch (err) {
@@ -171,11 +200,12 @@ export function DocsPanel({ slug, compact = false }: { slug: string; compact?: b
   }
 
   async function handleCreate() {
+    if (source.kind !== "project") return;
     setCreating(true);
     setCreateError(null);
     try {
       const filename = createFilename.trim();
-      await api.appendDoc(slug, filename, createContent);
+      await api.appendDoc(source.slug, filename, createContent);
       setCreateOpen(false);
       setCreateFilename("");
       setCreateContent("");
@@ -188,57 +218,39 @@ export function DocsPanel({ slug, compact = false }: { slug: string; compact?: b
     }
   }
 
-  const newDocButton = (
-    <Button size="icon-sm" variant="outline" title="New doc" onClick={() => setCreateOpen(true)}>
-      <Plus className="size-4" />
-    </Button>
-  );
-
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 md:flex-row md:gap-4">
-      {isMobile ? (
-        <div className="flex shrink-0 items-center gap-2">
-          <Sheet open={mobileListOpen} onOpenChange={setMobileListOpen}>
-            <SheetTrigger asChild>
-              <Button variant="outline" size="sm" className="flex-1 justify-between gap-2 font-mono">
-                <span className="truncate">{selected ?? "Choose a doc…"}</span>
-                <ChevronsUpDown className="size-4 shrink-0 opacity-60" />
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="bottom" className="max-h-[75vh] overflow-y-auto">
-              <SheetHeader>
-                <SheetTitle>Docs</SheetTitle>
-              </SheetHeader>
-              <div className="flex flex-col gap-2 px-4 pb-4">
-                <DocFileList filenames={filenames} selected={selected} onSelect={handleSelect} />
-              </div>
-            </SheetContent>
-          </Sheet>
-          {newDocButton}
-        </div>
-      ) : (
-        <div className="flex w-56 shrink-0 flex-col gap-2">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-medium">Docs</span>
-            {newDocButton}
-          </div>
-          <ScrollArea className="min-h-0 flex-1 rounded-md border">
-            <div className="p-1">
-              <DocFileList filenames={filenames} selected={selected} onSelect={handleSelect} />
-            </div>
-          </ScrollArea>
-        </div>
-      )}
-      {listError && <p className="text-xs text-destructive">{listError}</p>}
-
-      <div className="flex min-h-0 flex-1 flex-col gap-2">
-        {!selected && (
-          <p className="text-sm text-muted-foreground">Select a doc to view or edit it.</p>
+    <div className="flex h-full min-h-0 flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium">Docs</span>
+        {!readOnly && (
+          <Button size="icon-sm" variant="outline" title="New doc" onClick={() => setCreateOpen(true)}>
+            <Plus className="size-4" />
+          </Button>
         )}
-        {selected && (
-          <>
-            <div className="flex items-center justify-between gap-2">
+      </div>
+      {listError && <p className="text-xs text-destructive">{listError}</p>}
+      <ScrollArea className="min-h-0 flex-1 rounded-xl border border-border">
+        <div className="p-1.5">
+          <DocFileList filenames={filenames} selected={selected} onSelect={handleSelect} />
+        </div>
+      </ScrollArea>
+
+      {expanded && selected && (
+        <div className="fixed inset-4 z-50 flex flex-col gap-3 rounded-2xl bg-background p-3 shadow-2xl ring-1 ring-border">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <Button variant="ghost" size="icon-sm" title="Back to docs" onClick={closeExpanded}>
+                <Minimize2 className="size-4" />
+              </Button>
+              <FileText className="size-4 shrink-0 text-muted-foreground" />
               <span className="truncate font-mono text-sm">{selected}</span>
+              {readOnly && (
+                <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                  Read-only
+                </span>
+              )}
+            </div>
+            {!readOnly && (
               <div className="flex shrink-0 gap-2">
                 {mode === "preview" ? (
                   <>
@@ -261,88 +273,90 @@ export function DocsPanel({ slug, compact = false }: { slug: string; compact?: b
                   </>
                 )}
               </div>
-            </div>
-
-            {contentLoading ? (
-              <p className="text-sm text-muted-foreground">Loading…</p>
-            ) : mode === "preview" ? (
-              <ScrollArea className="min-h-0 flex-1 rounded-md border p-4">
-                {content.trim().length > 0 ? (
-                  <MarkdownContent content={content} />
-                ) : (
-                  <p className="text-sm text-muted-foreground">This doc is empty.</p>
-                )}
-              </ScrollArea>
-            ) : (
-              <Textarea
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                className="min-h-0 flex-1 resize-none font-mono text-xs"
-              />
             )}
-            {contentError && <p className="text-xs text-destructive">{contentError}</p>}
-
-            {mode === "preview" && (
-              <div className="flex shrink-0 flex-col gap-2 border-t pt-2 sm:flex-row">
-                <Textarea
-                  placeholder="Append a note — adds a new dated section instead of overwriting…"
-                  value={appendText}
-                  onChange={(e) => setAppendText(e.target.value)}
-                  className="min-h-16 flex-1 text-xs"
-                />
-                <Button
-                  size="sm"
-                  className="sm:self-end"
-                  onClick={handleAppend}
-                  disabled={!appendText.trim() || appending}
-                >
-                  {appending ? "Appending…" : "Append"}
-                </Button>
-              </div>
-            )}
-          </>
-        )}
-      </div>
-
-      <Dialog
-        open={createOpen}
-        onOpenChange={(next) => {
-          setCreateOpen(next);
-          setCreateError(null);
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>New doc</DialogTitle>
-            <DialogDescription>
-              Filename must end in .md — letters, numbers, dots, hyphens, and underscores only.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3 py-2">
-            <Input
-              placeholder="notes.md"
-              value={createFilename}
-              onChange={(e) => setCreateFilename(e.target.value)}
-              className="font-mono text-sm"
-            />
-            <Textarea
-              placeholder="Initial content…"
-              value={createContent}
-              onChange={(e) => setCreateContent(e.target.value)}
-              className="min-h-32"
-            />
-            {createError && <p className="text-xs text-destructive">{createError}</p>}
           </div>
-          <DialogFooter>
-            <Button
-              onClick={handleCreate}
-              disabled={!createFilename.trim() || !createContent.trim() || creating}
-            >
-              {creating ? "Creating…" : "Create"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+
+          {contentLoading ? (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          ) : mode === "preview" ? (
+            <ScrollArea className="min-h-0 flex-1 rounded-xl border border-border p-4">
+              {content.trim().length > 0 ? (
+                <MarkdownContent content={content} />
+              ) : (
+                <p className="text-sm text-muted-foreground">This doc is empty.</p>
+              )}
+            </ScrollArea>
+          ) : (
+            <Textarea
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              className="min-h-0 flex-1 resize-none font-mono text-xs"
+            />
+          )}
+          {contentError && <p className="text-xs text-destructive">{contentError}</p>}
+
+          {!readOnly && mode === "preview" && (
+            <div className="flex shrink-0 flex-col gap-2 border-t border-border pt-2 sm:flex-row">
+              <Textarea
+                placeholder="Append a note — adds a new dated section instead of overwriting…"
+                value={appendText}
+                onChange={(e) => setAppendText(e.target.value)}
+                className="min-h-16 flex-1 text-xs"
+              />
+              <Button
+                size="sm"
+                className="sm:self-end"
+                onClick={handleAppend}
+                disabled={!appendText.trim() || appending}
+              >
+                {appending ? "Appending…" : "Append"}
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {!readOnly && (
+        <Dialog
+          open={createOpen}
+          onOpenChange={(next) => {
+            setCreateOpen(next);
+            setCreateError(null);
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>New doc</DialogTitle>
+              <DialogDescription>
+                Filename must end in .md — letters, numbers, dots, hyphens, and underscores only.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 py-2">
+              <Input
+                placeholder="notes.md"
+                value={createFilename}
+                onChange={(e) => setCreateFilename(e.target.value)}
+                className="font-mono text-sm"
+              />
+              <Textarea
+                placeholder="Initial content…"
+                value={createContent}
+                onChange={(e) => setCreateContent(e.target.value)}
+                className="min-h-32"
+              />
+              {createError && <p className="text-xs text-destructive">{createError}</p>}
+            </div>
+            <DialogFooter>
+              <Button
+                onClick={handleCreate}
+                disabled={!createFilename.trim() || !createContent.trim() || creating}
+              >
+                {creating ? "Creating…" : "Create"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

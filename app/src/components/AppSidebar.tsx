@@ -39,12 +39,20 @@ function ProjectIcon({ slug, title }: { slug: string; title: string }) {
   );
 }
 
+// project.tags is stored server-side as JSON.stringify(string[]) (see
+// ProjectsService.create) — "[]" when empty, not a comma-separated string.
+function parseTags(tags: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(tags);
+    return Array.isArray(parsed) ? parsed.filter((t): t is string => typeof t === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 function subtitleFor(project: Project): string {
   if (project.summary && project.summary.trim()) return project.summary;
-  const tags = project.tags
-    .split(",")
-    .map((t) => t.trim())
-    .filter(Boolean);
+  const tags = parseTags(project.tags);
   return tags.length > 0 ? tags.join(", ") : "No description yet";
 }
 

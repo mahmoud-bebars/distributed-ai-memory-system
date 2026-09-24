@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { Bindings } from "../../lib/bindings";
+import { DocsService } from "../docs";
 import { ProjectsService } from "../projects";
 import { SharesService } from "./service";
 
@@ -44,4 +45,31 @@ publicShareRoutes.get("/:token/memory", async (c) => {
 
   const projects = new ProjectsService(c.env);
   return c.json(await projects.readMemory(project.slug));
+});
+
+// Read-only doc access for share links — same token-is-the-auth model as
+// /memory above, and deliberately only GET: no append/update/delete routes
+// exist here, so a share link can never mutate a project's docs no matter
+// what the frontend does or doesn't render.
+publicShareRoutes.get("/:token/docs", async (c) => {
+  const shares = new SharesService(c.env);
+  const project = await shares.resolveProjectByToken(c.req.param("token"));
+  if (!project) return c.json({ error: "Not found" }, 404);
+
+  const docs = new DocsService(c.env);
+  return c.json({ filenames: await docs.list(project.slug) });
+});
+
+publicShareRoutes.get("/:token/docs/:filename", async (c) => {
+  const shares = new SharesService(c.env);
+  const project = await shares.resolveProjectByToken(c.req.param("token"));
+  if (!project) return c.json({ error: "Not found" }, 404);
+
+  const docs = new DocsService(c.env);
+  const content = await docs.read(project.slug, c.req.param("filename"));
+  if (content === null) return c.json({ error: "Not found" }, 404);
+
+  return new Response(content, {
+    headers: { "content-type": "text/markdown; charset=utf-8" },
+  });
 });
