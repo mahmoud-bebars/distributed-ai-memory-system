@@ -78,7 +78,36 @@ function ProposedActionCard({
   );
 }
 
-export function ChatPanel({ slug, entryCount }: { slug: string; entryCount: number }) {
+// ChatService.ask dumps every memory entry AND every project doc into its
+// context on every question — there's no picker, nothing is excluded. These
+// only describe that so it's visible in the UI; neither controls it.
+function contextParts(entryCount: number, docCount: number): string[] {
+  const parts: string[] = [];
+  if (entryCount > 0) parts.push(`${entryCount} memory ${entryCount === 1 ? "entry" : "entries"}`);
+  if (docCount > 0) parts.push(`${docCount} ${docCount === 1 ? "doc" : "docs"}`);
+  return parts;
+}
+
+function contextSummary(entryCount: number, docCount: number): string {
+  const parts = contextParts(entryCount, docCount);
+  if (parts.length === 0) return "This project has no memory or docs recorded yet.";
+  return `This chat sees ${parts.join(" and ")} from this project on every question — nothing to select, it's all included automatically.`;
+}
+
+function loadingLabel(entryCount: number, docCount: number): string {
+  const parts = contextParts(entryCount, docCount);
+  return parts.length === 0 ? "Thinking…" : `Reading ${parts.join(" and ")}…`;
+}
+
+export function ChatPanel({
+  slug,
+  entryCount,
+  docCount,
+}: {
+  slug: string;
+  entryCount: number;
+  docCount: number;
+}) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
@@ -146,6 +175,7 @@ export function ChatPanel({ slug, entryCount }: { slug: string; entryCount: numb
 
   return (
     <div className="flex h-full flex-col gap-3">
+      <p className="text-xs text-muted-foreground">{contextSummary(entryCount, docCount)}</p>
       <ScrollArea className="min-h-0 flex-1 rounded-md border">
         <div className="flex flex-col gap-3 p-4">
           {messages.length === 0 && (
@@ -197,11 +227,7 @@ export function ChatPanel({ slug, entryCount }: { slug: string; entryCount: numb
             </div>
           ))}
           {loading && (
-            <p className="text-sm text-muted-foreground">
-              {entryCount > 0
-                ? `Reading ${entryCount} memory ${entryCount === 1 ? "entry" : "entries"}…`
-                : "Thinking…"}
-            </p>
+            <p className="text-sm text-muted-foreground">{loadingLabel(entryCount, docCount)}</p>
           )}
           {error && <p className="text-sm text-destructive">{error}</p>}
         </div>

@@ -19,6 +19,7 @@ import { Download, RefreshCw } from "lucide-react";
 
 export function ProjectView({ project }: { project: Project }) {
   const [entries, setEntries] = useState<MemoryEntry[]>([]);
+  const [docCount, setDocCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,9 +33,23 @@ export function ProjectView({ project }: { project: Project }) {
       .finally(() => setLoading(false));
   }, [project.slug]);
 
+  // Chat dumps every doc into its context alongside memory (ChatService.ask)
+  // with no picker to select among them — this count is purely so the Chat
+  // tab can tell the user that's happening, not something the user narrows.
+  const fetchDocCount = useCallback(() => {
+    return api
+      .getDocs(project.slug)
+      .then((r) => setDocCount(r.filenames.length))
+      .catch(() => {
+        // Non-critical for the rest of the page — the Chat tab just won't
+        // show a doc count if this fails, memory still loads independently.
+      });
+  }, [project.slug]);
+
   useEffect(() => {
     fetchMemory();
-  }, [fetchMemory]);
+    fetchDocCount();
+  }, [fetchMemory, fetchDocCount]);
 
   async function handleRawExport() {
     try {
@@ -60,8 +75,11 @@ export function ProjectView({ project }: { project: Project }) {
           <Button
             variant="outline"
             size="icon"
-            title="Refresh memory"
-            onClick={() => fetchMemory()}
+            title="Refresh memory and docs"
+            onClick={() => {
+              fetchMemory();
+              fetchDocCount();
+            }}
             disabled={loading}
           >
             <RefreshCw className={loading ? "size-4 animate-spin" : "size-4"} />
@@ -106,7 +124,7 @@ export function ProjectView({ project }: { project: Project }) {
           <DocsPanel slug={project.slug} />
         </TabsContent>
         <TabsContent value="chat" className="min-h-0 flex-1">
-          <ChatPanel slug={project.slug} entryCount={entries.length} />
+          <ChatPanel slug={project.slug} entryCount={entries.length} docCount={docCount} />
         </TabsContent>
         <TabsContent value="prompts" className="min-h-0 flex-1 overflow-y-auto">
           <PromptsPanel slug={project.slug} />
