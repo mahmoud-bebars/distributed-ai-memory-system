@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/api";
+import { MarkdownContent } from "@/components/MarkdownContent";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -8,22 +9,62 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
-import { Plus } from "lucide-react";
+import { ChevronsUpDown, Pencil, Plus } from "lucide-react";
+
+type Mode = "preview" | "edit";
 
 // Markdown doc files stored separately from memory.jsonl (see
-// src/modules/docs). This panel is the first frontend surface for them —
-// the backend/MCP tools (append_doc, update_doc, delete_doc) predate it.
+// src/modules/docs). GitHub-style: a file opens in a rendered, read-only
+// preview; an explicit Edit button switches to a raw textarea, with
+// Save/Cancel to leave it. On narrow screens the file list moves into a
+// bottom sheet instead of a permanent side column.
+function DocFileList({
+  filenames,
+  selected,
+  onSelect,
+}: {
+  filenames: string[];
+  selected: string | null;
+  onSelect: (filename: string) => void;
+}) {
+  if (filenames.length === 0) {
+    return <p className="p-2 text-xs text-muted-foreground">No docs yet.</p>;
+  }
+  return (
+    <div className="flex flex-col gap-0.5">
+      {filenames.map((filename) => (
+        <button
+          key={filename}
+          type="button"
+          onClick={() => onSelect(filename)}
+          className={cn(
+            "rounded px-2 py-2 text-left font-mono text-xs hover:bg-muted",
+            selected === filename && "bg-muted font-medium",
+          )}
+        >
+          {filename}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function DocsPanel({ slug }: { slug: string }) {
+  const isMobile = useIsMobile();
+
   const [filenames, setFilenames] = useState<string[]>([]);
   const [listError, setListError] = useState<string | null>(null);
+  const [mobileListOpen, setMobileListOpen] = useState(false);
 
   const [selected, setSelected] = useState<string | null>(null);
+  const [mode, setMode] = useState<Mode>("preview");
   const [content, setContent] = useState("");
   const [originalContent, setOriginalContent] = useState("");
   const [contentLoading, setContentLoading] = useState(false);
@@ -40,6 +81,8 @@ export function DocsPanel({ slug }: { slug: string }) {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
+  const dirty = content !== originalContent;
+
   const refreshList = useCallback(() => {
     return api
       .getDocs(slug)
@@ -52,8 +95,9 @@ export function DocsPanel({ slug }: { slug: string }) {
     refreshList();
   }, [refreshList]);
 
-  function selectFile(filename: string) {
+  function loadFile(filename: string) {
     setSelected(filename);
+    setMode("preview");
     setContentLoading(true);
     setContentError(null);
     api
@@ -66,6 +110,17 @@ export function DocsPanel({ slug }: { slug: string }) {
       .finally(() => setContentLoading(false));
   }
 
+  function handleSelect(filename: string) {
+    if (mode === "edit" && dirty && !window.confirm("Discard unsaved changes?")) return;
+    loadFile(filename);
+    setMobileListOpen(false);
+  }
+
+  function handleCancelEdit() {
+    setContent(originalContent);
+    setMode("preview");
+  }
+
   async function handleSave() {
     if (!selected) return;
     setSaving(true);
@@ -73,6 +128,7 @@ export function DocsPanel({ slug }: { slug: string }) {
     try {
       await api.updateDoc(slug, selected, content);
       setOriginalContent(content);
+      setMode("preview");
     } catch (err) {
       setContentError(err instanceof Error ? err.message : "Failed to save doc.");
     } finally {
@@ -118,13 +174,13 @@ export function DocsPanel({ slug }: { slug: string }) {
     setCreating(true);
     setCreateError(null);
     try {
-      await api.appendDoc(slug, createFilename.trim(), createContent);
-      setCreateOpen(false);
       const filename = createFilename.trim();
+      await api.appendDoc(slug, filename, createContent);
+      setCreateOpen(false);
       setCreateFilename("");
       setCreateContent("");
       await refreshList();
-      selectFile(filename);
+      loadFile(filename);
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : "Failed to create doc.");
     } finally {
@@ -132,80 +188,48 @@ export function DocsPanel({ slug }: { slug: string }) {
     }
   }
 
-  const dirty = content !== originalContent;
+  const newDocButton = (
+    <Button size="icon-sm" variant="outline" title="New doc" onClick={() => setCreateOpen(true)}>
+      <Plus className="size-4" />
+    </Button>
+  );
 
   return (
-    <div className="flex h-full min-h-0 gap-4">
-      <div className="flex w-56 shrink-0 flex-col gap-2">
-        <div className="flex items-center justify-between">
-          <span className="text-sm font-medium">Docs</span>
-          <Dialog
-            open={createOpen}
-            onOpenChange={(next) => {
-              setCreateOpen(next);
-              setCreateError(null);
-            }}
-          >
-            <DialogTrigger asChild>
-              <Button size="icon-sm" variant="outline" title="New doc">
-                <Plus className="size-4" />
+    <div className="flex h-full min-h-0 flex-col gap-3 md:flex-row md:gap-4">
+      {isMobile ? (
+        <div className="flex shrink-0 items-center gap-2">
+          <Sheet open={mobileListOpen} onOpenChange={setMobileListOpen}>
+            <SheetTrigger asChild>
+              <Button variant="outline" size="sm" className="flex-1 justify-between gap-2 font-mono">
+                <span className="truncate">{selected ?? "Choose a doc…"}</span>
+                <ChevronsUpDown className="size-4 shrink-0 opacity-60" />
               </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>New doc</DialogTitle>
-                <DialogDescription>
-                  Filename must end in .md — letters, numbers, dots, hyphens, and underscores only.
-                </DialogDescription>
-              </DialogHeader>
-              <div className="space-y-3 py-2">
-                <Input
-                  placeholder="notes.md"
-                  value={createFilename}
-                  onChange={(e) => setCreateFilename(e.target.value)}
-                  className="font-mono text-sm"
-                />
-                <Textarea
-                  placeholder="Initial content…"
-                  value={createContent}
-                  onChange={(e) => setCreateContent(e.target.value)}
-                  className="min-h-32"
-                />
-                {createError && <p className="text-xs text-destructive">{createError}</p>}
+            </SheetTrigger>
+            <SheetContent side="bottom" className="max-h-[75vh] overflow-y-auto">
+              <SheetHeader>
+                <SheetTitle>Docs</SheetTitle>
+              </SheetHeader>
+              <div className="flex flex-col gap-2 px-4 pb-4">
+                <DocFileList filenames={filenames} selected={selected} onSelect={handleSelect} />
               </div>
-              <DialogFooter>
-                <Button
-                  onClick={handleCreate}
-                  disabled={!createFilename.trim() || !createContent.trim() || creating}
-                >
-                  {creating ? "Creating…" : "Create"}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+            </SheetContent>
+          </Sheet>
+          {newDocButton}
         </div>
-        <ScrollArea className="min-h-0 flex-1 rounded-md border">
-          <div className="flex flex-col gap-0.5 p-1">
-            {filenames.length === 0 && (
-              <p className="p-2 text-xs text-muted-foreground">No docs yet.</p>
-            )}
-            {filenames.map((filename) => (
-              <button
-                key={filename}
-                type="button"
-                onClick={() => selectFile(filename)}
-                className={cn(
-                  "rounded px-2 py-1.5 text-left font-mono text-xs hover:bg-muted",
-                  selected === filename && "bg-muted font-medium",
-                )}
-              >
-                {filename}
-              </button>
-            ))}
+      ) : (
+        <div className="flex w-56 shrink-0 flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium">Docs</span>
+            {newDocButton}
           </div>
-        </ScrollArea>
-        {listError && <p className="text-xs text-destructive">{listError}</p>}
-      </div>
+          <ScrollArea className="min-h-0 flex-1 rounded-md border">
+            <div className="p-1">
+              <DocFileList filenames={filenames} selected={selected} onSelect={handleSelect} />
+            </div>
+          </ScrollArea>
+        </div>
+      )}
+      {listError && <p className="text-xs text-destructive">{listError}</p>}
 
       <div className="flex min-h-0 flex-1 flex-col gap-2">
         {!selected && (
@@ -213,20 +237,42 @@ export function DocsPanel({ slug }: { slug: string }) {
         )}
         {selected && (
           <>
-            <div className="flex items-center justify-between">
-              <span className="font-mono text-sm">{selected}</span>
-              <div className="flex gap-2">
-                <Button size="sm" onClick={handleSave} disabled={!dirty || saving}>
-                  {saving ? "Saving…" : "Save"}
-                </Button>
-                <Button size="sm" variant="destructive" onClick={handleDelete} disabled={deleting}>
-                  {deleting ? "Deleting…" : "Delete"}
-                </Button>
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate font-mono text-sm">{selected}</span>
+              <div className="flex shrink-0 gap-2">
+                {mode === "preview" ? (
+                  <>
+                    <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setMode("edit")}>
+                      <Pencil className="size-3.5" />
+                      Edit
+                    </Button>
+                    <Button size="sm" variant="destructive" onClick={handleDelete} disabled={deleting}>
+                      {deleting ? "Deleting…" : "Delete"}
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Button size="sm" onClick={handleSave} disabled={!dirty || saving}>
+                      {saving ? "Saving…" : "Save"}
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={handleCancelEdit}>
+                      Cancel
+                    </Button>
+                  </>
+                )}
               </div>
             </div>
 
             {contentLoading ? (
               <p className="text-sm text-muted-foreground">Loading…</p>
+            ) : mode === "preview" ? (
+              <ScrollArea className="min-h-0 flex-1 rounded-md border p-4">
+                {content.trim().length > 0 ? (
+                  <MarkdownContent content={content} />
+                ) : (
+                  <p className="text-sm text-muted-foreground">This doc is empty.</p>
+                )}
+              </ScrollArea>
             ) : (
               <Textarea
                 value={content}
@@ -236,25 +282,67 @@ export function DocsPanel({ slug }: { slug: string }) {
             )}
             {contentError && <p className="text-xs text-destructive">{contentError}</p>}
 
-            <div className="flex shrink-0 gap-2 border-t pt-2">
-              <Textarea
-                placeholder="Append a note — adds a new dated section instead of overwriting…"
-                value={appendText}
-                onChange={(e) => setAppendText(e.target.value)}
-                className="min-h-16 flex-1 text-xs"
-              />
-              <Button
-                size="sm"
-                className="self-end"
-                onClick={handleAppend}
-                disabled={!appendText.trim() || appending}
-              >
-                {appending ? "Appending…" : "Append"}
-              </Button>
-            </div>
+            {mode === "preview" && (
+              <div className="flex shrink-0 flex-col gap-2 border-t pt-2 sm:flex-row">
+                <Textarea
+                  placeholder="Append a note — adds a new dated section instead of overwriting…"
+                  value={appendText}
+                  onChange={(e) => setAppendText(e.target.value)}
+                  className="min-h-16 flex-1 text-xs"
+                />
+                <Button
+                  size="sm"
+                  className="sm:self-end"
+                  onClick={handleAppend}
+                  disabled={!appendText.trim() || appending}
+                >
+                  {appending ? "Appending…" : "Append"}
+                </Button>
+              </div>
+            )}
           </>
         )}
       </div>
+
+      <Dialog
+        open={createOpen}
+        onOpenChange={(next) => {
+          setCreateOpen(next);
+          setCreateError(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>New doc</DialogTitle>
+            <DialogDescription>
+              Filename must end in .md — letters, numbers, dots, hyphens, and underscores only.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Input
+              placeholder="notes.md"
+              value={createFilename}
+              onChange={(e) => setCreateFilename(e.target.value)}
+              className="font-mono text-sm"
+            />
+            <Textarea
+              placeholder="Initial content…"
+              value={createContent}
+              onChange={(e) => setCreateContent(e.target.value)}
+              className="min-h-32"
+            />
+            {createError && <p className="text-xs text-destructive">{createError}</p>}
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={handleCreate}
+              disabled={!createFilename.trim() || !createContent.trim() || creating}
+            >
+              {creating ? "Creating…" : "Create"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
