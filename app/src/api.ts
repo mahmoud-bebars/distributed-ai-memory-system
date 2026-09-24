@@ -79,6 +79,19 @@ export const api = {
     if (!response.ok) throw new Error(`Failed to fetch raw memory: ${response.status}`);
     return response.blob();
   },
+  getDocs: (slug: string) => request<{ filenames: string[] }>(`/projects/${slug}/docs`),
+  getDoc: async (slug: string, filename: string): Promise<string> => {
+    const response = await fetch(`/api/projects/${slug}/docs/${encodeURIComponent(filename)}`);
+    if (!response.ok) throw new Error(`Failed to fetch doc: ${response.status}`);
+    return response.text();
+  },
+  /** Creates the doc if it doesn't exist yet, otherwise appends — the same
+   *  append-only semantics as the append_doc MCP tool (see DocsService). */
+  appendDoc: (slug: string, filename: string, content: string) =>
+    request<{ ok: true }>(`/projects/${slug}/docs`, {
+      method: "POST",
+      body: JSON.stringify({ filename, content }),
+    }),
   /** Full-overwrite replace — the Approve action for a proposed update_doc
    *  edit calls this (PUT), never the append-only POST above. */
   updateDoc: (slug: string, filename: string, content: string) =>

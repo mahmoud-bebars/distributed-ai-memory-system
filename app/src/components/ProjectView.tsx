@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, type MemoryEntry, type Project } from "@/api";
 import { ChatPanel } from "@/components/ChatPanel";
+import { DocsPanel } from "@/components/DocsPanel";
 import { EntriesTable } from "@/components/EntriesTable";
 import { MemoryGraph } from "@/components/MemoryGraph";
 import { PromptsPanel } from "@/components/PromptsPanel";
@@ -91,6 +92,7 @@ export function ProjectView({ project }: { project: Project }) {
         <TabsList>
           <TabsTrigger value="graph">Graph</TabsTrigger>
           <TabsTrigger value="entries">Entries</TabsTrigger>
+          <TabsTrigger value="docs">Docs</TabsTrigger>
           <TabsTrigger value="chat">Chat</TabsTrigger>
           <TabsTrigger value="prompts">Prompts</TabsTrigger>
         </TabsList>
@@ -99,6 +101,9 @@ export function ProjectView({ project }: { project: Project }) {
         </TabsContent>
         <TabsContent value="entries" className="min-h-0 flex-1">
           <EntriesTable entries={entries} />
+        </TabsContent>
+        <TabsContent value="docs" className="min-h-0 flex-1">
+          <DocsPanel slug={project.slug} />
         </TabsContent>
         <TabsContent value="chat" className="min-h-0 flex-1">
           <ChatPanel slug={project.slug} entryCount={entries.length} />
