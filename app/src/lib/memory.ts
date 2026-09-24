@@ -1,4 +1,18 @@
+import {
+  Building2,
+  CalendarDays,
+  CircleDot,
+  Cpu,
+  FlaskConical,
+  FolderKanban,
+  type LucideIcon,
+  Lightbulb,
+  Package,
+  Sparkles,
+  User,
+} from "lucide-react";
 import type { MemoryEntry } from "@/api";
+import { accentVar, type AccentHue } from "@/lib/palette";
 
 // Mirrors src/modules/projects/schema.ts's entityCategorySchema. Kept as a
 // plain duplicate rather than a shared import — the frontend doesn't build
@@ -20,20 +34,42 @@ export type EntityCategory = (typeof ENTITY_CATEGORIES)[number];
 
 export const DEFAULT_ENTITY_CATEGORY: EntityCategory = "other";
 
-// Tableau10, assigned in a fixed order so a category always gets the same
-// color across sessions and views.
-export const CATEGORY_COLORS: Record<EntityCategory, string> = {
-  concept: "#4E79A7",
-  event: "#F28E2B",
-  feature: "#59A14F",
-  organization: "#B07AA1",
-  person: "#E15759",
-  product: "#EDC948",
-  project: "#76B7B2",
-  research: "#9C755F",
-  technology: "#FF9DA7",
-  other: "#BAB0AC",
+// Each entity category maps to one of the theme's semantic accent hues
+// (see DESIGN.md) plus a representative icon, used by the graph nodes,
+// category badges, and legends. "other" deliberately falls back to the
+// neutral muted-foreground tone rather than an accent, so uncategorized
+// entities (common — see EntityCategory's docs) don't visually compete
+// with intentionally-categorized ones.
+export const CATEGORY_HUES: Record<EntityCategory, AccentHue | "neutral"> = {
+  concept: "violet",
+  event: "amber",
+  feature: "teal",
+  organization: "rose",
+  person: "cyan",
+  product: "blue",
+  project: "green",
+  research: "fuchsia",
+  technology: "indigo",
+  other: "neutral",
 };
+
+export const CATEGORY_ICONS: Record<EntityCategory, LucideIcon> = {
+  concept: Lightbulb,
+  event: CalendarDays,
+  feature: Sparkles,
+  organization: Building2,
+  person: User,
+  product: Package,
+  project: FolderKanban,
+  research: FlaskConical,
+  technology: Cpu,
+  other: CircleDot,
+};
+
+export function categoryColor(category: EntityCategory): string {
+  const hue = CATEGORY_HUES[category];
+  return hue === "neutral" ? "var(--muted-foreground)" : accentVar(hue);
+}
 
 export function entityName(entry: MemoryEntry): string {
   return String(entry.content.name ?? entry.id);
@@ -71,6 +107,26 @@ export const TYPE_BADGE_VARIANT: Record<MemoryEntry["type"], "default" | "second
   relation: "secondary",
   observation: "outline",
 };
+
+/** Given a chat citation (see ChatSource), finds the entity name it's about
+ *  — the entity itself, the entity an observation is attached to, or the
+ *  source side of a relation — so a citation click can jump the graph
+ *  straight to the relevant node. Returns null when the entry no longer
+ *  exists or the citation doesn't resolve to any entity. */
+export function resolveSourceEntity(
+  entries: MemoryEntry[],
+  source: { id: string; type: MemoryEntry["type"] }
+): string | null {
+  const entry = entries.find((e) => e.id === source.id);
+  if (!entry) return null;
+  if (entry.type === "entity") return entityName(entry);
+  if (entry.type === "observation") return observationEntityName(entry) ?? null;
+  if (entry.type === "relation") {
+    const value = entry.content.source;
+    return typeof value === "string" ? value : null;
+  }
+  return null;
+}
 
 /** Last-write-wins projection of entities: dedupe by `content.name`,
  *  keeping the last occurrence in file order as current. Mirrors

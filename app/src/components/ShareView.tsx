@@ -4,7 +4,7 @@ import { EntriesTable } from "@/components/EntriesTable";
 import { MemoryGraph } from "@/components/MemoryGraph";
 import { ModeToggle } from "@/components/mode-toggle";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Brain } from "lucide-react";
+import { Sparkles } from "lucide-react";
 
 type LoadState = "loading" | "ok" | "not-found" | "error";
 
@@ -37,8 +37,13 @@ export function ShareView({ token }: { token: string }) {
 
   return (
     <div className="flex h-dvh flex-col">
-      <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
-        <Brain className="size-5 shrink-0" />
+      <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border/60 px-4">
+        <span
+          className="glow-ring flex size-7 shrink-0 items-center justify-center rounded-lg"
+          style={{ "--glow-color": "var(--accent-blue)", backgroundColor: "var(--primary)" } as React.CSSProperties}
+        >
+          <Sparkles className="size-4 text-primary-foreground" />
+        </span>
         <span className="flex-1 text-sm font-medium text-muted-foreground">
           Shared memory — read-only
         </span>

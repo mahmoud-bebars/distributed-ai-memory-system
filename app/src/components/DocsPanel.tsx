@@ -56,8 +56,8 @@ function DocFileList({
   );
 }
 
-export function DocsPanel({ slug }: { slug: string }) {
-  const isMobile = useIsMobile();
+export function DocsPanel({ slug, compact = false }: { slug: string; compact?: boolean }) {
+  const isMobile = useIsMobile() || compact;
 
   const [filenames, setFilenames] = useState<string[]>([]);
   const [listError, setListError] = useState<string | null>(null);

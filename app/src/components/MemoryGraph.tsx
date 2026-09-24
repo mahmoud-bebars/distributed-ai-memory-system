@@ -10,8 +10,9 @@ import {
 } from "d3-force";
 import { select, type Selection } from "d3-selection";
 import { type D3ZoomEvent, zoom, type ZoomBehavior, zoomIdentity } from "d3-zoom";
-import { Minus, Plus, RotateCcw } from "lucide-react";
+import { LayoutGrid, List, Maximize2, Minus, Network, Plus } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import type { MemoryEntry } from "@/api";
 import { CategoryBadge } from "@/components/CategoryBadge";
 import { Button } from "@/components/ui/button";
@@ -23,10 +24,13 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { cn } from "@/lib/utils";
 import {
-  CATEGORY_COLORS,
+  CATEGORY_ICONS,
+  categoryColor,
   categoryOf,
   currentEntities,
+  ENTITY_CATEGORIES,
   entityName,
   observationEntityName,
   observationText,
@@ -44,7 +48,20 @@ interface GraphLink extends SimulationLinkDatum<GraphNode> {
 
 const WIDTH = 800;
 const HEIGHT = 520;
-const NODE_RADIUS = 9;
+const NODE_RADIUS = 15;
+
+// Precomputed once: raw SVG markup for each category's lucide icon, white on
+// transparent, embedded into each node via <foreignObject> — the graph is
+// d3-driven (imperative DOM), so nodes aren't React elements and can't
+// render <Icon /> directly.
+const ICON_MARKUP: Record<EntityCategory, string> = Object.fromEntries(
+  ENTITY_CATEGORIES.map((category) => {
+    const Icon = CATEGORY_ICONS[category];
+    return [category, renderToStaticMarkup(<Icon color="white" strokeWidth={2.25} size={16} />)];
+  })
+) as Record<EntityCategory, string>;
+
+type ViewMode = "network" | "grid" | "list";
 
 function buildGraph(entries: MemoryEntry[]) {
   const current = currentEntities(entries);
@@ -94,7 +111,53 @@ function buildEntityDetail(entries: MemoryEntry[], name: string): EntityDetail {
   return { entity, observations, outgoing, incoming };
 }
 
-export function MemoryGraph({ entries }: { entries: MemoryEntry[] }) {
+/** An external request to select+pan to a node — e.g. clicking a chat
+ *  citation. `nonce` lets the same id be requested twice in a row and still
+ *  re-trigger the pan (an id alone wouldn't change and the effect wouldn't rerun). */
+export interface GraphFocusRequest {
+  id: string;
+  nonce: number;
+}
+
+function EntityChip({
+  id,
+  category,
+  onClick,
+}: {
+  id: string;
+  category: EntityCategory;
+  onClick: () => void;
+}) {
+  const color = categoryColor(category);
+  const Icon = CATEGORY_ICONS[category];
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="glow-hover flex items-center gap-2.5 rounded-xl border border-border bg-card p-2.5 text-left"
+      style={{ "--glow-color": color } as React.CSSProperties}
+    >
+      <span
+        className="flex size-8 shrink-0 items-center justify-center rounded-lg"
+        style={{ backgroundColor: color }}
+      >
+        <Icon className="size-4 text-white" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium">{id}</span>
+        <span className="block text-xs text-muted-foreground capitalize">{category}</span>
+      </span>
+    </button>
+  );
+}
+
+export function MemoryGraph({
+  entries,
+  focusRequest,
+}: {
+  entries: MemoryEntry[];
+  focusRequest?: GraphFocusRequest | null;
+}) {
   const { nodes, links } = useMemo(() => buildGraph(entries), [entries]);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const zoomGroupRef = useRef<SVGGElement | null>(null);
@@ -102,6 +165,8 @@ export function MemoryGraph({ entries }: { entries: MemoryEntry[] }) {
   const zoomBehaviorRef = useRef<ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [mode, setMode] = useState<ViewMode>("network");
+  const [zoomPct, setZoomPct] = useState(100);
 
   const searchMatch = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -115,18 +180,18 @@ export function MemoryGraph({ entries }: { entries: MemoryEntry[] }) {
   }, [nodes]);
 
   useEffect(() => {
-    if (!svgRef.current || !zoomGroupRef.current || nodes.length === 0) return;
+    if (mode !== "network" || !svgRef.current || !zoomGroupRef.current || nodes.length === 0) return;
 
     const svg = select(svgRef.current);
     const zoomGroup = select(zoomGroupRef.current);
 
     const linkSelection = zoomGroup
       .select<SVGGElement>(".links")
-      .selectAll<SVGLineElement, GraphLink>("line")
+      .selectAll<SVGPathElement, GraphLink>("path")
       .data(links)
-      .join("line")
-      .attr("stroke", "var(--color-muted-foreground)")
-      .attr("stroke-opacity", 0.5)
+      .join("path")
+      .attr("fill", "none")
+      .attr("stroke", "url(#dams-link-fade)")
       .attr("stroke-width", 1.5)
       .attr("marker-end", "url(#dams-arrow)");
 
@@ -135,10 +200,19 @@ export function MemoryGraph({ entries }: { entries: MemoryEntry[] }) {
       .selectAll<SVGGElement, GraphNode>("g")
       .data(nodes, (d) => d.id)
       .join((enter) => {
-        const g = enter.append("g").style("cursor", "pointer");
-        g.append("circle").attr("r", NODE_RADIUS);
+        const g = enter.append("g").attr("class", "dams-node").style("cursor", "pointer");
+        g.append("circle").attr("class", "dams-node-ring").attr("r", NODE_RADIUS + 4).attr("fill", "none");
+        g.append("circle").attr("class", "dams-node-circle").attr("r", NODE_RADIUS);
+        g.append("foreignObject")
+          .attr("x", -8)
+          .attr("y", -8)
+          .attr("width", 16)
+          .attr("height", 16)
+          .style("pointer-events", "none")
+          .html((d) => ICON_MARKUP[d.category]);
         g.append("text")
-          .attr("x", NODE_RADIUS + 4)
+          .attr("class", "dams-node-label")
+          .attr("x", NODE_RADIUS + 6)
           .attr("y", 4)
           .attr("font-size", 12)
           .attr("fill", "var(--color-foreground)")
@@ -147,23 +221,24 @@ export function MemoryGraph({ entries }: { entries: MemoryEntry[] }) {
       });
 
     nodeGroup
-      .select("circle")
-      .attr("fill", (d) => CATEGORY_COLORS[d.category])
-      .attr("stroke", (d) => {
-        if (d.id === selected) return "var(--color-foreground)";
-        if (searchMatch && d.id === searchMatch.id) return "var(--color-foreground)";
-        return "none";
-      })
-      .attr("stroke-width", (d) => (d.id === selected ? 3 : searchMatch?.id === d.id ? 2 : 0));
+      .attr("data-selected", (d) => d.id === selected)
+      .attr("data-match", (d) => searchMatch?.id === d.id)
+      .style("--node-color", (d) => categoryColor(d.category));
+
+    nodeGroup.select(".dams-node-circle").attr("fill", (d) => categoryColor(d.category));
+    nodeGroup
+      .select(".dams-node-ring")
+      .attr("stroke", (d) => (d.id === selected || searchMatch?.id === d.id ? "var(--color-foreground)" : "transparent"))
+      .attr("stroke-width", 2);
 
     nodeGroup.on("click", (_event, d) => setSelected(d.id));
 
     const simulation =
       simulationRef.current ??
       forceSimulation<GraphNode>()
-        .force("charge", forceManyBody().strength(-160))
+        .force("charge", forceManyBody().strength(-220))
         .force("center", forceCenter(WIDTH / 2, HEIGHT / 2))
-        .force("link", forceLink<GraphNode, GraphLink>().id((d) => d.id).distance(100));
+        .force("link", forceLink<GraphNode, GraphLink>().id((d) => d.id).distance(115));
     simulationRef.current = simulation;
 
     simulation.nodes(nodes);
@@ -171,25 +246,24 @@ export function MemoryGraph({ entries }: { entries: MemoryEntry[] }) {
     simulation.alpha(0.6).restart();
 
     simulation.on("tick", () => {
-      linkSelection
-        .attr("x1", (d) => (d.source as GraphNode).x ?? 0)
-        .attr("y1", (d) => (d.source as GraphNode).y ?? 0)
-        .attr("x2", (d) => {
-          const s = d.source as GraphNode;
-          const t = d.target as GraphNode;
-          const dx = (t.x ?? 0) - (s.x ?? 0);
-          const dy = (t.y ?? 0) - (s.y ?? 0);
-          const len = Math.hypot(dx, dy) || 1;
-          return (t.x ?? 0) - (dx / len) * (NODE_RADIUS + 6);
-        })
-        .attr("y2", (d) => {
-          const s = d.source as GraphNode;
-          const t = d.target as GraphNode;
-          const dx = (t.x ?? 0) - (s.x ?? 0);
-          const dy = (t.y ?? 0) - (s.y ?? 0);
-          const len = Math.hypot(dx, dy) || 1;
-          return (t.y ?? 0) - (dy / len) * (NODE_RADIUS + 6);
-        });
+      linkSelection.attr("d", (d) => {
+        const s = d.source as GraphNode;
+        const t = d.target as GraphNode;
+        const sx = s.x ?? 0;
+        const sy = s.y ?? 0;
+        let tx = t.x ?? 0;
+        let ty = t.y ?? 0;
+        const dx = tx - sx;
+        const dy = ty - sy;
+        const len = Math.hypot(dx, dy) || 1;
+        // Pull the arrowhead back off the node circle, then bow the path
+        // gently outward from the straight line for a soft curve.
+        tx -= (dx / len) * (NODE_RADIUS + 6);
+        ty -= (dy / len) * (NODE_RADIUS + 6);
+        const mx = (sx + tx) / 2 - dy * 0.12;
+        const my = (sy + ty) / 2 + dx * 0.12;
+        return `M${sx},${sy} Q${mx},${my} ${tx},${ty}`;
+      });
 
       nodeGroup.attr("transform", (d) => `translate(${d.x ?? 0},${d.y ?? 0})`);
     });
@@ -215,6 +289,7 @@ export function MemoryGraph({ entries }: { entries: MemoryEntry[] }) {
       .scaleExtent([0.3, 4])
       .on("zoom", (event: D3ZoomEvent<SVGSVGElement, unknown>) => {
         zoomGroup.attr("transform", event.transform.toString());
+        setZoomPct(Math.round(event.transform.k * 100));
       });
     zoomBehaviorRef.current = zoomBehavior;
     svg.call(zoomBehavior);
@@ -231,7 +306,7 @@ export function MemoryGraph({ entries }: { entries: MemoryEntry[] }) {
       simulation.on("tick", null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes, links, selected, searchMatch]);
+  }, [nodes, links, selected, searchMatch, mode]);
 
   useEffect(() => {
     return () => {
@@ -239,9 +314,59 @@ export function MemoryGraph({ entries }: { entries: MemoryEntry[] }) {
     };
   }, []);
 
+  // The <svg> unmounts whenever `mode` leaves "network" (grid/list render
+  // plain HTML instead), so a fresh one — at identity transform — is
+  // mounted each time it comes back. Resync the displayed percentage only
+  // on that transition, not on every selection change (which also reruns
+  // the effect above but leaves the existing zoom transform untouched).
+  const prevModeRef = useRef<ViewMode>(mode);
+  useEffect(() => {
+    if (mode === "network" && prevModeRef.current !== "network") setZoomPct(100);
+    prevModeRef.current = mode;
+  }, [mode]);
+
+  // An external jump request (e.g. a chat citation click) — select the node
+  // and, if it currently has simulation coordinates, pan/zoom to it exactly
+  // like a search match does.
+  useEffect(() => {
+    if (!focusRequest) return;
+    setMode("network");
+    setSelected(focusRequest.id);
+    const node = nodes.find((n) => n.id === focusRequest.id);
+    if (node && node.x != null && node.y != null && svgRef.current && zoomBehaviorRef.current) {
+      const transform = zoomIdentity
+        .translate(WIDTH / 2, HEIGHT / 2)
+        .scale(1.4)
+        .translate(-node.x, -node.y);
+      select(svgRef.current).call(zoomBehaviorRef.current.transform, transform);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusRequest?.nonce]);
+
   function withZoom(fn: (svg: Selection<SVGSVGElement, unknown, null, undefined>, zb: ZoomBehavior<SVGSVGElement, unknown>) => void) {
     if (!svgRef.current || !zoomBehaviorRef.current) return;
     fn(select(svgRef.current), zoomBehaviorRef.current);
+  }
+
+  function fitToScreen() {
+    const withCoords = nodes.filter((n) => n.x != null && n.y != null);
+    if (withCoords.length === 0) {
+      withZoom((svg, zb) => svg.call(zb.transform, zoomIdentity));
+      return;
+    }
+    const xs = withCoords.map((n) => n.x as number);
+    const ys = withCoords.map((n) => n.y as number);
+    const minX = Math.min(...xs) - NODE_RADIUS - 30;
+    const maxX = Math.max(...xs) + NODE_RADIUS + 30;
+    const minY = Math.min(...ys) - NODE_RADIUS - 30;
+    const maxY = Math.max(...ys) + NODE_RADIUS + 30;
+    const w = Math.max(maxX - minX, 1);
+    const h = Math.max(maxY - minY, 1);
+    const scale = Math.min(4, Math.max(0.3, Math.min(WIDTH / w, HEIGHT / h)));
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    const transform = zoomIdentity.translate(WIDTH / 2, HEIGHT / 2).scale(scale).translate(-cx, -cy);
+    withZoom((svg, zb) => svg.call(zb.transform, transform));
   }
 
   const detail = selected ? buildEntityDetail(entries, selected) : null;
@@ -254,8 +379,24 @@ export function MemoryGraph({ entries }: { entries: MemoryEntry[] }) {
     );
   }
 
+  const viewModes: { key: ViewMode; icon: typeof Network; title: string }[] = [
+    { key: "network", icon: Network, title: "Graph layout" },
+    { key: "grid", icon: LayoutGrid, title: "Grid layout" },
+    { key: "list", icon: List, title: "Compact list" },
+  ];
+
   return (
     <div className="flex h-full flex-col gap-3">
+      <style>{`
+        .dams-node-circle { transition: filter 150ms ease, r 150ms ease; }
+        .dams-node:hover .dams-node-circle,
+        .dams-node[data-selected="true"] .dams-node-circle,
+        .dams-node[data-match="true"] .dams-node-circle {
+          filter: drop-shadow(0 0 8px var(--node-color));
+        }
+        .dams-node-ring { transition: stroke-opacity 150ms ease; }
+        .dams-node-label { paint-order: stroke; stroke: var(--color-background); stroke-width: 3px; stroke-linejoin: round; }
+      `}</style>
       <div className="flex items-center gap-3">
         <Input
           placeholder="Search entity by name…"
@@ -263,72 +404,102 @@ export function MemoryGraph({ entries }: { entries: MemoryEntry[] }) {
           onChange={(e) => setSearch(e.target.value)}
           className="max-w-xs"
         />
-        <div className="ml-auto flex items-center gap-1">
-          <Button
-            variant="outline"
-            size="icon"
-            title="Zoom in"
-            onClick={() => withZoom((svg, zb) => svg.call(zb.scaleBy, 1.3))}
-          >
-            <Plus className="size-4" />
-          </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            title="Zoom out"
-            onClick={() => withZoom((svg, zb) => svg.call(zb.scaleBy, 1 / 1.3))}
-          >
-            <Minus className="size-4" />
-          </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            title="Reset view"
-            onClick={() => withZoom((svg, zb) => svg.call(zb.transform, zoomIdentity))}
-          >
-            <RotateCcw className="size-4" />
-          </Button>
-        </div>
       </div>
 
-      <div className="relative min-h-0 flex-1 overflow-hidden rounded-md border bg-card">
-        <svg ref={svgRef} viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="h-full w-full">
-          <defs>
-            <marker
-              id="dams-arrow"
-              viewBox="0 0 10 10"
-              refX="9"
-              refY="5"
-              markerWidth="6"
-              markerHeight="6"
-              orient="auto-start-reverse"
-            >
-              <path d="M0,0L10,5L0,10z" fill="var(--color-muted-foreground)" />
-            </marker>
-          </defs>
-          <g ref={zoomGroupRef}>
-            <g className="links" />
-            <g className="nodes" />
-          </g>
-        </svg>
+      <div className="relative min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-card">
+        {mode === "network" && (
+          <svg ref={svgRef} viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="h-full w-full">
+            <defs>
+              <linearGradient id="dams-link-fade">
+                <stop offset="0%" stopColor="var(--color-muted-foreground)" stopOpacity={0.7} />
+                <stop offset="50%" stopColor="var(--color-muted-foreground)" stopOpacity={0.15} />
+                <stop offset="100%" stopColor="var(--color-muted-foreground)" stopOpacity={0.7} />
+              </linearGradient>
+              <marker
+                id="dams-arrow"
+                viewBox="0 0 10 10"
+                refX="9"
+                refY="5"
+                markerWidth="6"
+                markerHeight="6"
+                orient="auto-start-reverse"
+              >
+                <path d="M0,0L10,5L0,10z" fill="var(--color-muted-foreground)" />
+              </marker>
+            </defs>
+            <g ref={zoomGroupRef}>
+              <g className="links" />
+              <g className="nodes" />
+            </g>
+          </svg>
+        )}
 
-        <div className="absolute bottom-3 left-3 rounded-md border bg-card/95 p-2.5 text-xs shadow-sm backdrop-blur">
-          <p className="mb-1.5 font-medium text-muted-foreground">Category</p>
-          <div className="flex flex-col gap-1">
-            {legend.map((category) => (
-              <span key={category} className="flex items-center gap-1.5">
-                <span
-                  className="inline-block size-2.5 shrink-0 rounded-full"
-                  style={{ backgroundColor: CATEGORY_COLORS[category] }}
-                />
-                {category}
-              </span>
+        {mode === "grid" && (
+          <div className="grid h-full grid-cols-2 gap-2 overflow-y-auto p-3 sm:grid-cols-3 lg:grid-cols-4">
+            {nodes.map((n) => (
+              <EntityChip key={n.id} id={n.id} category={n.category} onClick={() => setSelected(n.id)} />
             ))}
-            <span className="mt-1 flex items-center gap-1.5 border-t pt-1 text-muted-foreground">
-              <span className="inline-block h-px w-4 bg-muted-foreground" /> relation
-            </span>
           </div>
+        )}
+
+        {mode === "list" && (
+          <div className="flex h-full flex-col gap-1.5 overflow-y-auto p-3">
+            {nodes.map((n) => (
+              <EntityChip key={n.id} id={n.id} category={n.category} onClick={() => setSelected(n.id)} />
+            ))}
+          </div>
+        )}
+
+        <div className="absolute bottom-3 left-3 flex items-center gap-1.5 rounded-xl border border-border bg-popover/95 p-1.5 shadow-sm backdrop-blur">
+          {viewModes.map(({ key, icon: Icon, title }) => (
+            <Button
+              key={key}
+              variant="ghost"
+              size="icon-sm"
+              title={title}
+              aria-pressed={mode === key}
+              className={cn(mode === key && "bg-accent text-accent-foreground")}
+              onClick={() => setMode(key)}
+            >
+              <Icon className="size-4" />
+            </Button>
+          ))}
+          {mode === "network" && (
+            <>
+              <span className="mx-0.5 h-5 w-px bg-border" />
+              <Button variant="ghost" size="icon-sm" title="Zoom out" onClick={() => withZoom((svg, zb) => svg.call(zb.scaleBy, 1 / 1.3))}>
+                <Minus className="size-4" />
+              </Button>
+              <span className="w-10 text-center text-xs tabular-nums text-muted-foreground">{zoomPct}%</span>
+              <Button variant="ghost" size="icon-sm" title="Zoom in" onClick={() => withZoom((svg, zb) => svg.call(zb.scaleBy, 1.3))}>
+                <Plus className="size-4" />
+              </Button>
+              <Button variant="ghost" size="icon-sm" title="Fit to screen" onClick={fitToScreen}>
+                <Maximize2 className="size-4" />
+              </Button>
+            </>
+          )}
         </div>
+
+        {mode === "network" && (
+          <div className="absolute bottom-3 right-3 rounded-xl border border-border bg-popover/95 p-2.5 text-xs shadow-sm backdrop-blur">
+            <p className="mb-1.5 font-medium text-muted-foreground">Category</p>
+            <div className="flex flex-col gap-1">
+              {legend.map((category) => {
+                const Icon = CATEGORY_ICONS[category];
+                return (
+                  <span key={category} className="flex items-center gap-1.5">
+                    <Icon className="size-3" style={{ color: categoryColor(category) }} />
+                    {category}
+                  </span>
+                );
+              })}
+              <span className="mt-1 flex items-center gap-1.5 border-t border-border pt-1 text-muted-foreground">
+                <span className="inline-block h-px w-4 bg-muted-foreground" /> relation
+              </span>
+            </div>
+          </div>
+        )}
       </div>
 
       <Sheet open={selected !== null} onOpenChange={(open) => !open && setSelected(null)}>

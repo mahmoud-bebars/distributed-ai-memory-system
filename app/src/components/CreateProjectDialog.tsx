@@ -24,8 +24,20 @@ function slugify(title: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-export function CreateProjectDialog({ onCreated }: { onCreated: (slug: string) => void }) {
-  const [open, setOpen] = useState(false);
+export function CreateProjectDialog({
+  onCreated,
+  open: openProp,
+  onOpenChange: setOpenProp,
+  hideTrigger = false,
+}: {
+  onCreated: (slug: string) => void;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  hideTrigger?: boolean;
+}) {
+  const [openState, setOpenState] = useState(false);
+  const open = openProp ?? openState;
+  const setOpen = setOpenProp ?? setOpenState;
   const [title, setTitle] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,12 +67,14 @@ export function CreateProjectDialog({ onCreated }: { onCreated: (slug: string) =
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm" className="w-full justify-start gap-2">
-          <Plus className="size-4" />
-          New project
-        </Button>
-      </DialogTrigger>
+      {!hideTrigger && (
+        <DialogTrigger asChild>
+          <Button size="sm" className="w-full justify-start gap-2">
+            <Plus className="size-4" />
+            New project
+          </Button>
+        </DialogTrigger>
+      )}
       <DialogContent>
         <form onSubmit={handleCreate}>
           <DialogHeader>
