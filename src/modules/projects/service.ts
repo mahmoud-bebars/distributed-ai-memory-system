@@ -62,6 +62,32 @@ export class ProjectsService {
     return (await this.get(input.slug))!;
   }
 
+  /** Replaces the title, summary, and tags — the only project fields
+   *  editable after creation. The slug is permanent: it's the primary key,
+   *  the R2 key prefix, and how every MCP tool addresses this project, so
+   *  it's deliberately not accepted here. Fails clearly if the project
+   *  doesn't exist. */
+  async update(
+    slug: string,
+    input: { title: string; summary: string | null; tags: string[] }
+  ): Promise<ProjectRow> {
+    if (!(await this.get(slug))) {
+      throw new Error(`Unknown project: ${slug}`);
+    }
+
+    await this.db
+      .update(projects)
+      .set({
+        title: input.title,
+        summary: input.summary,
+        tags: JSON.stringify(input.tags),
+        updatedAt: sql`(datetime('now'))`,
+      })
+      .where(eq(projects.slug, slug));
+
+    return (await this.get(slug))!;
+  }
+
   /** Reads the full JSONL blob and parses it into entries. Fine at small scale;
    *  revisit with range reads or a D1 entity index once files get large. */
   async readMemory(slug: string): Promise<MemoryEntry[]> {

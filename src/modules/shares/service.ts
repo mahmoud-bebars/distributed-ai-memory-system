@@ -1,9 +1,9 @@
-import { eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
 import { projectShares, type ProjectRow, type ProjectShareRow } from "../../db/schema";
 import type { Bindings } from "../../lib/bindings";
 import { ProjectsService } from "../projects";
-import type { ShareStatus } from "./schema";
+import type { CreateShareLinkInput, ExpirationOption, UpdateShareLinkInput } from "./schema";
 
 // mcp.mahmoudbebars.dev is the one hostname deliberately left outside
 // Cloudflare Access (see wrangler.toml's routes and CLAUDE.md's share-link
@@ -12,6 +12,26 @@ import type { ShareStatus } from "./schema";
 const SHARE_HOST = "mcp.mahmoudbebars.dev";
 
 export const shareUrl = (token: string): string => `https://${SHARE_HOST}/share/${token}`;
+
+const EXPIRATION_MS: Record<ExpirationOption, number | null> = {
+  "1d": 24 * 60 * 60 * 1000,
+  "7d": 7 * 24 * 60 * 60 * 1000,
+  "30d": 30 * 24 * 60 * 60 * 1000,
+  "90d": 90 * 24 * 60 * 60 * 1000,
+  never: null,
+};
+
+// Always computed fresh from "now" at create/update time — editing a link's
+// expiration to "7 days" means "7 days from whenever you saved that", not
+// an extension of whatever expiry it had before.
+function computeExpiresAt(option: ExpirationOption): string | null {
+  const ms = EXPIRATION_MS[option];
+  return ms === null ? null : new Date(Date.now() + ms).toISOString();
+}
+
+function isExpired(share: ProjectShareRow): boolean {
+  return share.expiresAt !== null && new Date(share.expiresAt).getTime() <= Date.now();
+}
 
 export class SharesService {
   private readonly db: DrizzleD1Database;
@@ -22,47 +42,84 @@ export class SharesService {
     this.projects = new ProjectsService(env);
   }
 
-  async status(slug: string): Promise<ShareStatus> {
-    const share = await this.get(slug);
-    return share ? { active: true, token: share.token, url: shareUrl(share.token) } : { active: false };
+  /** All share links for a project, newest first — including expired ones,
+   *  so the owner's management view can show "expired" rather than have
+   *  links silently vanish. Only the public resolve path below treats an
+   *  expired link as gone. */
+  async list(slug: string): Promise<ProjectShareRow[]> {
+    return this.db
+      .select()
+      .from(projectShares)
+      .where(eq(projectShares.slug, slug))
+      .orderBy(desc(projectShares.createdAt));
   }
 
-  private async get(slug: string): Promise<ProjectShareRow | null> {
-    const rows = await this.db.select().from(projectShares).where(eq(projectShares.slug, slug)).limit(1);
-    return rows[0] ?? null;
-  }
-
-  /** Generates a new unguessable token and upserts it as the project's one
-   *  active share — a fresh call here is how "regenerate" works too, since
-   *  it replaces whatever token existed before. */
-  async create(slug: string): Promise<{ token: string; url: string }> {
+  async create(slug: string, input: CreateShareLinkInput): Promise<ProjectShareRow> {
     if (!(await this.projects.get(slug))) {
       throw new Error(`Unknown project: ${slug}`);
     }
 
     const token = crypto.randomUUID();
+    await this.db.insert(projectShares).values({
+      token,
+      slug,
+      label: input.label?.trim() || null,
+      allowChat: input.allowChat,
+      allowDocs: input.allowDocs,
+      expiresAt: computeExpiresAt(input.expiresIn),
+    });
+
+    return (await this.getByToken(token))!;
+  }
+
+  /** Label/allowChat/allowDocs are a full replace. Expiration is the one
+   *  exception: omitting `expiresIn` leaves the link's current expiry
+   *  untouched rather than resetting it to "never" — see
+   *  updateShareLinkSchema's comment. Fails clearly if the token doesn't
+   *  belong to this project (or doesn't exist at all) — same "unknown X"
+   *  convention as ProjectsService/DocsService. */
+  async update(slug: string, token: string, input: UpdateShareLinkInput): Promise<ProjectShareRow> {
+    const existing = await this.getByToken(token);
+    if (!existing || existing.slug !== slug) {
+      throw new Error(`Unknown share link: ${token}`);
+    }
+
     await this.db
-      .insert(projectShares)
-      .values({ slug, token })
-      .onConflictDoUpdate({
-        target: projectShares.slug,
-        set: { token, createdAt: sql`(datetime('now'))` },
-      });
+      .update(projectShares)
+      .set({
+        label: input.label?.trim() || null,
+        allowChat: input.allowChat,
+        allowDocs: input.allowDocs,
+        expiresAt: input.expiresIn === undefined ? existing.expiresAt : computeExpiresAt(input.expiresIn),
+        updatedAt: sql`(datetime('now'))`,
+      })
+      .where(eq(projectShares.token, token));
 
-    return { token, url: shareUrl(token) };
+    return (await this.getByToken(token))!;
   }
 
-  async revoke(slug: string): Promise<void> {
-    await this.db.delete(projectShares).where(eq(projectShares.slug, slug));
+  async revoke(slug: string, token: string): Promise<void> {
+    await this.db
+      .delete(projectShares)
+      .where(and(eq(projectShares.token, token), eq(projectShares.slug, slug)));
   }
 
-  /** Resolves a share token to its project, or null if the token doesn't
-   *  match anything — callers should turn that into a plain 404 without
-   *  distinguishing "no such token" from any other failure. */
-  async resolveProjectByToken(token: string): Promise<ProjectRow | null> {
+  private async getByToken(token: string): Promise<ProjectShareRow | null> {
     const rows = await this.db.select().from(projectShares).where(eq(projectShares.token, token)).limit(1);
-    const share = rows[0];
-    if (!share) return null;
-    return this.projects.get(share.slug);
+    return rows[0] ?? null;
+  }
+
+  /** Resolves a share token to its project + link settings, or null if the
+   *  token doesn't exist, doesn't match a project anymore, OR has expired —
+   *  callers must fold all three into the same plain 404, never
+   *  distinguishing "expired" from "never existed" in the response. */
+  async resolveByToken(token: string): Promise<{ project: ProjectRow; share: ProjectShareRow } | null> {
+    const share = await this.getByToken(token);
+    if (!share || isExpired(share)) return null;
+
+    const project = await this.projects.get(share.slug);
+    if (!project) return null;
+
+    return { project, share };
   }
 }

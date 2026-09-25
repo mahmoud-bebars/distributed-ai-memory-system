@@ -19,15 +19,27 @@ export const projects = sqliteTable("projects", {
 export type ProjectRow = typeof projects.$inferSelect;
 export type NewProjectRow = typeof projects.$inferInsert;
 
-// One active share token per project — creating a new one replaces the old
-// (upsert on `slug`, the PK), which is how "regenerate" and "revoke + reissue"
-// both work. A separate explicit revoke just deletes the row.
+// A project can have any number of share links, each independently
+// configured — a label to tell them apart, whether Chat/Docs are exposed
+// alongside the always-included Graph/Entries view, and an optional
+// expiry. `token` (not `slug`) is the primary key since there's no longer
+// one link per project.
 export const projectShares = sqliteTable("project_shares", {
+  token: text("token").primaryKey(),
   slug: text("slug")
-    .primaryKey()
+    .notNull()
     .references(() => projects.slug),
-  token: text("token").notNull().unique(),
+  label: text("label"),
+  allowChat: integer("allow_chat", { mode: "boolean" }).notNull().default(false),
+  allowDocs: integer("allow_docs", { mode: "boolean" }).notNull().default(false),
+  // Null means "never expires". Otherwise an ISO timestamp — expiry is
+  // computed once at create/update time from a duration (see
+  // shares/service.ts's computeExpiresAt), not stored as a duration itself.
+  expiresAt: text("expires_at"),
   createdAt: text("created_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
+  updatedAt: text("updated_at")
     .notNull()
     .default(sql`(datetime('now'))`),
 });

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
 import { api } from "@/api";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,9 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { FileText, Minimize2, Pencil, Plus } from "lucide-react";
+import { FileText, Minimize2, Pencil, Plus, Upload } from "lucide-react";
+
+const PDF2AI_URL = "https://pdf2ai.mahmoudbebars.dev";
 
 type Mode = "preview" | "edit";
 
@@ -89,6 +91,7 @@ export function DocsPanel({ source }: { source: DocsSource }) {
   const [createContent, setCreateContent] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const dirty = !readOnly && content !== originalContent;
 
@@ -197,6 +200,37 @@ export function DocsPanel({ source }: { source: DocsSource }) {
     } finally {
       setAppending(false);
     }
+  }
+
+  // Reads an uploaded file client-side and drops its text straight into the
+  // create-doc form — nothing is sent to the server until Create is clicked.
+  // Only .md is accepted: docFilenameSchema (src/modules/docs/schema.ts)
+  // rejects anything else server-side anyway, so this is just a friendlier
+  // failure than a 400 from the API, plus a pointer to pdf2ai for the PDF
+  // case specifically, since that's the file type people most often reach
+  // for here.
+  function handleFileSelected(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith(".md")) {
+      setCreateError(
+        file.name.toLowerCase().endsWith(".pdf")
+          ? "PDFs aren't supported here — convert it to Markdown first (see the note below)."
+          : "Only Markdown (.md) files can be uploaded here."
+      );
+      return;
+    }
+
+    setCreateError(null);
+    const reader = new FileReader();
+    reader.onload = () => {
+      setCreateContent(typeof reader.result === "string" ? reader.result : "");
+      setCreateFilename(file.name);
+    };
+    reader.onerror = () => setCreateError("Failed to read that file.");
+    reader.readAsText(file);
   }
 
   async function handleCreate() {
@@ -332,6 +366,36 @@ export function DocsPanel({ source }: { source: DocsSource }) {
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-3 py-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".md,text/markdown"
+                onChange={handleFileSelected}
+                className="hidden"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <Upload className="size-3.5" />
+                Upload a .md file
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                Only Markdown (.md) files can be uploaded. Have a PDF? Convert it to Markdown
+                first at{" "}
+                <a
+                  href={PDF2AI_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary underline underline-offset-2"
+                >
+                  pdf2ai.mahmoudbebars.dev
+                </a>
+                , then upload the result here.
+              </p>
               <Input
                 placeholder="notes.md"
                 value={createFilename}

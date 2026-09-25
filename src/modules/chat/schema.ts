@@ -4,6 +4,11 @@ import type { MemoryEntry } from "../projects/schema";
 
 export const chatRequestSchema = z.object({
   question: z.string().min(1).max(4000),
+  // When set, ChatService scopes the docs half of its context to just this
+  // one file instead of dumping every doc — memory stays unscoped either
+  // way. Lets a question about one specific doc skip the token cost of
+  // every other doc in the project.
+  docFilename: z.string().min(1).optional(),
 });
 
 export type ChatRequestInput = z.infer<typeof chatRequestSchema>;

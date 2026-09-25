@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import type { Bindings } from "../../lib/bindings";
-import { appendMemorySchema, createProjectSchema } from "./schema";
+import { appendMemorySchema, createProjectSchema, updateProjectSchema } from "./schema";
 import { ProjectsService } from "./service";
 
 export const projectsRoutes = new Hono<{ Bindings: Bindings }>();
@@ -19,6 +19,23 @@ projectsRoutes.post("/", zValidator("json", createProjectSchema), async (c) => {
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     const status = message.startsWith("Project already exists") ? 409 : 500;
+    return c.json({ error: message }, status);
+  }
+});
+
+projectsRoutes.patch("/:slug", zValidator("json", updateProjectSchema), async (c) => {
+  const service = new ProjectsService(c.env);
+  const { title, summary, tags } = c.req.valid("json");
+  try {
+    const project = await service.update(c.req.param("slug"), {
+      title: title.trim(),
+      summary: summary.trim() || null,
+      tags,
+    });
+    return c.json(project);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    const status = message.startsWith("Unknown project") ? 404 : 500;
     return c.json({ error: message }, status);
   }
 });

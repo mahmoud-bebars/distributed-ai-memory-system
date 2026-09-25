@@ -7,7 +7,7 @@ import {
 } from "@/components/ui/dialog";
 
 const SHORTCUTS: { keys: string; description: string }[] = [
-  { keys: "⌘K", description: "Focus project search" },
+  { keys: "⌘K", description: "Open the project switcher" },
   { keys: "⌘/", description: "Show this shortcuts overlay" },
   { keys: "G then L", description: "Toggle graph / list view in the current project" },
   { keys: "⌘⏎", description: "Send the current chat message" },

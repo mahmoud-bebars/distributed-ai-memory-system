@@ -1,6 +1,6 @@
 import { CopyButton } from "@/components/CopyButton";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { seedPrompt, syncPrompt } from "@/lib/prompts";
+import { autoSyncPrompt, seedPrompt, syncPrompt } from "@/lib/prompts";
 
 export function PromptsPanel({ slug }: { slug: string }) {
   return (
@@ -36,6 +36,25 @@ export function PromptsPanel({ slug }: { slug: string }) {
         <CardContent>
           <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-md border bg-muted/40 p-3 text-xs">
             {syncPrompt(slug)}
+          </pre>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Set up continuous sync</CardTitle>
+          <CardDescription>
+            One-time setup — writes a standing instruction into CLAUDE.md or AGENTS.md so future
+            sessions proactively ask to sync changes, instead of only syncing when you run the
+            prompt above yourself.
+          </CardDescription>
+          <CardAction>
+            <CopyButton text={autoSyncPrompt(slug)} size="sm" />
+          </CardAction>
+        </CardHeader>
+        <CardContent>
+          <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-md border bg-muted/40 p-3 text-xs">
+            {autoSyncPrompt(slug)}
           </pre>
         </CardContent>
       </Card>

@@ -103,7 +103,12 @@ export class ChatService {
     this.docs = new DocsService(env);
   }
 
-  async ask(slug: string, question: string): Promise<ChatResponse> {
+  async ask(
+    slug: string,
+    question: string,
+    options: { docFilename?: string; includeDocs?: boolean; allowMutatingTools?: boolean } = {},
+  ): Promise<ChatResponse> {
+    const { docFilename, includeDocs = true, allowMutatingTools = true } = options;
     const project = await this.projects.get(slug);
     if (!project) throw new Error(`Unknown project: ${slug}`);
 
@@ -111,21 +116,19 @@ export class ChatService {
     const contextEntries = entries.slice(0, MAX_CONTEXT_ENTRIES);
     const memoryContext = contextEntries.map((entry) => JSON.stringify(entry)).join("\n");
 
-    // Same naive full-dump approach as memory above, reusing DocsService's
-    // existing list/read rather than touching R2 directly here. No cap like
-    // MAX_CONTEXT_ENTRIES yet — a docs-heavy project can grow this prompt
-    // large; see this module's summary note rather than silently truncating.
-    const docFilenames = await this.docs.list(slug);
-    const docFiles = await Promise.all(
-      docFilenames.map(async (filename) => ({
-        filename,
-        content: (await this.docs.read(slug, filename)) ?? "",
-      })),
-    );
-    const docsContext =
-      docFiles.length > 0
-        ? docFiles.map(({ filename, content }) => `### ${filename}\n\n${content}`).join("\n\n---\n\n")
-        : "(no docs recorded yet)";
+    // Memory is always included in full. The docs half of the context can
+    // be scoped down to one file via `docFilename`, or dropped entirely via
+    // `includeDocs: false` — the latter is how a share link with docs
+    // sharing turned off keeps doc content out of chat answers too, not
+    // just out of the Docs tab. Either way, skipping means never listing or
+    // reading the excluded docs at all, not just hiding them from the
+    // prompt after the fact.
+    const { docsContext, docsLabel } = includeDocs
+      ? await this.buildDocsContext(slug, docFilename)
+      : {
+          docsLabel: "Project docs: not included in this conversation.",
+          docsContext: "(docs are not shared here — answer from memory entries only)",
+        };
 
     const systemPrompt = [
       `You are a memory assistant for the project "${project.title}".`,
@@ -142,14 +145,22 @@ export class ChatService {
       "Memory entries (JSONL):",
       memoryContext || "(no entries recorded yet)",
       "",
-      "Project docs (separate markdown files, not part of the memory log):",
+      docsLabel,
       docsContext,
-      "",
-      "You can propose edits to project docs with the update_doc and",
-      "delete_doc tools. Calling one does not make the change — it only",
-      "shows the user a pending action they must explicitly approve. Only",
-      "call one when the user has actually asked for that specific change in",
-      "this conversation; never call them speculatively or as a guess.",
+      ...(allowMutatingTools
+        ? [
+            "",
+            "You can propose edits to project docs with the update_doc and",
+            "delete_doc tools. Calling one does not make the change — it only",
+            "shows the user a pending action they must explicitly approve. Only",
+            "call one when the user has actually asked for that specific change in",
+            "this conversation; never call them speculatively or as a guess.",
+          ]
+        : [
+            "",
+            "This is a read-only shared view — you have no tools here and cannot",
+            "propose doc edits. Just answer from the context above.",
+          ]),
     ].join("\n");
 
     const response = await fetch(ANTHROPIC_API_URL, {
@@ -163,11 +174,16 @@ export class ChatService {
         model: MODEL,
         max_tokens: 1024,
         system: systemPrompt,
-        tools: [UPDATE_DOC_TOOL, DELETE_DOC_TOOL],
         // At most one tool call per turn — proposedAction only has room for
         // one pending action, so there's nothing useful a second call in the
-        // same turn could do.
-        tool_choice: { type: "auto", disable_parallel_tool_use: true },
+        // same turn could do. Omitted entirely (rather than an empty array)
+        // for a read-only share, where there's nothing to propose.
+        ...(allowMutatingTools
+          ? {
+              tools: [UPDATE_DOC_TOOL, DELETE_DOC_TOOL],
+              tool_choice: { type: "auto", disable_parallel_tool_use: true },
+            }
+          : {}),
         messages: [{ role: "user", content: question }],
       }),
     });
@@ -193,6 +209,41 @@ export class ChatService {
     const proposedAction = this.extractProposedAction(data.content);
 
     return { answer, sources, ...(proposedAction ? { proposedAction } : {}) };
+  }
+
+  /** Builds the "Project docs" half of the system prompt. With no
+   *  `docFilename`, this is the original naive full-dump — every doc, no
+   *  cap. With one, it reads only that file (never lists or reads the
+   *  rest), so a doc-scoped question pays for exactly one file's tokens. */
+  private async buildDocsContext(
+    slug: string,
+    docFilename?: string,
+  ): Promise<{ docsContext: string; docsLabel: string }> {
+    if (docFilename) {
+      const content = await this.docs.read(slug, docFilename);
+      if (content === null) {
+        throw new Error(`Unknown doc: ${docFilename} (in project ${slug})`);
+      }
+      return {
+        docsLabel: `Project docs (scoped to one file, "${docFilename}" — other docs in this project are not included):`,
+        docsContext: `### ${docFilename}\n\n${content}`,
+      };
+    }
+
+    const docFilenames = await this.docs.list(slug);
+    const docFiles = await Promise.all(
+      docFilenames.map(async (filename) => ({
+        filename,
+        content: (await this.docs.read(slug, filename)) ?? "",
+      })),
+    );
+    return {
+      docsLabel: "Project docs (separate markdown files, not part of the memory log):",
+      docsContext:
+        docFiles.length > 0
+          ? docFiles.map(({ filename, content }) => `### ${filename}\n\n${content}`).join("\n\n---\n\n")
+          : "(no docs recorded yet)",
+    };
   }
 
   /** Picks the first update_doc/delete_doc tool_use block out of a response

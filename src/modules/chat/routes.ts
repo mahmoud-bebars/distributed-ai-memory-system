@@ -8,14 +8,14 @@ export const chatRoutes = new Hono<{ Bindings: Bindings }>();
 
 chatRoutes.post("/:slug/chat", zValidator("json", chatRequestSchema), async (c) => {
   const service = new ChatService(c.env);
-  const { question } = c.req.valid("json");
+  const { question, docFilename } = c.req.valid("json");
 
   try {
-    const result = await service.ask(c.req.param("slug"), question);
+    const result = await service.ask(c.req.param("slug"), question, { docFilename });
     return c.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    const status = message.startsWith("Unknown project") ? 404 : 502;
+    const status = message.startsWith("Unknown project") || message.startsWith("Unknown doc") ? 404 : 502;
     return c.json({ error: message }, status);
   }
 });

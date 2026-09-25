@@ -13,6 +13,17 @@ export const createProjectSchema = z.object({
   tags: z.array(z.string()).default([]),
 });
 
+// Title, summary, and tags are editable after creation; the slug alone is
+// permanent (see CreateProjectPage/EditProjectDialog) — MCP tools and every
+// storage key (R2 object path, D1 primary key) address a project by slug,
+// never by title, so renaming never breaks how an AI agent reaches it. This
+// is deliberately not a partial version of createProjectSchema (no `slug`).
+export const updateProjectSchema = z.object({
+  title: z.string().min(1).max(200),
+  summary: z.string().max(2000),
+  tags: z.array(z.string()).default([]),
+});
+
 export const entityCategorySchema = z.enum([
   "concept",
   "event",
@@ -54,6 +65,7 @@ export const appendMemorySchema = z.object({
 });
 
 export type CreateProjectInput = z.infer<typeof createProjectSchema>;
+export type UpdateProjectInput = z.infer<typeof updateProjectSchema>;
 export type MemoryEntry = z.infer<typeof memoryEntrySchema>;
 export type AppendMemoryInput = z.infer<typeof appendMemorySchema>;
 

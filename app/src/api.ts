@@ -38,7 +38,36 @@ export interface ChatResponse {
   proposedAction?: ProposedAction;
 }
 
-export type ShareStatus = { active: false } | { active: true; token: string; url: string };
+export type ExpirationOption = "1d" | "7d" | "30d" | "90d" | "never";
+
+export interface ShareLinkInput {
+  label?: string;
+  allowChat: boolean;
+  allowDocs: boolean;
+  // Required on create; omitting it on update means "leave the current
+  // expiration alone" rather than resetting it to never (matches the
+  // backend's updateShareLinkSchema).
+  expiresIn?: ExpirationOption;
+}
+
+export interface ShareLink {
+  token: string;
+  slug: string;
+  label: string | null;
+  allowChat: boolean;
+  allowDocs: boolean;
+  expiresAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  url: string;
+}
+
+export interface ShareMeta {
+  project: { slug: string; title: string; summary: string | null };
+  label: string | null;
+  allowChat: boolean;
+  allowDocs: boolean;
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, {
@@ -62,16 +91,26 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   listProjects: () => request<Project[]>("/projects"),
-  createProject: (input: { slug: string; title: string; tags: string[] }) =>
+  createProject: (input: { slug: string; title: string; summary?: string; tags: string[] }) =>
     request<Project>("/projects", {
       method: "POST",
       body: JSON.stringify(input),
     }),
+  /** Title/summary/tags are editable after creation — the slug alone is
+   *  permanent (it's how MCP tools address the project). */
+  updateProject: (slug: string, input: { title: string; summary: string; tags: string[] }) =>
+    request<Project>(`/projects/${slug}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
   getMemory: (slug: string) => request<MemoryEntry[]>(`/projects/${slug}/memory`),
-  askChat: (slug: string, question: string) =>
+  /** `docFilename` scopes the chat's doc context to just that one file
+   *  instead of every doc in the project — memory is always included in
+   *  full either way. */
+  askChat: (slug: string, question: string, docFilename?: string) =>
     request<ChatResponse>(`/projects/${slug}/chat`, {
       method: "POST",
-      body: JSON.stringify({ question }),
+      body: JSON.stringify({ question, ...(docFilename ? { docFilename } : {}) }),
     }),
   /** Fetches the raw memory.jsonl bytes for download — not re-serialized JSON. */
   downloadMemoryRaw: async (slug: string): Promise<Blob> => {
@@ -103,11 +142,28 @@ export const api = {
     request<{ ok: true }>(`/projects/${slug}/docs/${encodeURIComponent(filename)}`, {
       method: "DELETE",
     }),
-  getShareStatus: (slug: string) => request<ShareStatus>(`/projects/${slug}/share`),
-  createShare: (slug: string) =>
-    request<{ token: string; url: string }>(`/projects/${slug}/share`, { method: "POST" }),
-  revokeShare: (slug: string) =>
-    request<{ ok: true }>(`/projects/${slug}/share`, { method: "DELETE" }),
+  /** A project can have any number of independently configured share
+   *  links — this lists all of them, newest first, expired ones included
+   *  (the manager UI shows "expired" rather than silently dropping them). */
+  listShareLinks: (slug: string) => request<ShareLink[]>(`/projects/${slug}/share`),
+  createShareLink: (slug: string, input: ShareLinkInput) =>
+    request<ShareLink>(`/projects/${slug}/share`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  /** Every field but the token is editable — label, chat/docs toggles, and
+   *  expiration all update in place without changing the link itself. */
+  updateShareLink: (slug: string, token: string, input: ShareLinkInput) =>
+    request<ShareLink>(`/projects/${slug}/share/${token}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
+  revokeShareLink: (slug: string, token: string) =>
+    request<{ ok: true }>(`/projects/${slug}/share/${token}`, { method: "DELETE" }),
+  /** Public, token-authed — no session, no cookies. Tells the share page
+   *  which tabs it's allowed to show (Docs/Chat gated per-link) before it
+   *  fetches anything else. */
+  getShareMeta: (token: string) => request<ShareMeta>(`/share/${token}`),
   /** Public read-only endpoint behind a share token — no auth, same shape
    *  as the authenticated memory endpoint. */
   getShareMemory: (token: string) => request<MemoryEntry[]>(`/share/${token}/memory`),
@@ -121,4 +177,11 @@ export const api = {
     if (!response.ok) throw new Error(`Failed to fetch doc: ${response.status}`);
     return response.text();
   },
+  /** Only reachable when the link's allowChat is on — 404s otherwise, same
+   *  as an invalid token would. Uses the project owner's Anthropic key. */
+  askShareChat: (token: string, question: string, docFilename?: string) =>
+    request<ChatResponse>(`/share/${token}/chat`, {
+      method: "POST",
+      body: JSON.stringify({ question, ...(docFilename ? { docFilename } : {}) }),
+    }),
 };

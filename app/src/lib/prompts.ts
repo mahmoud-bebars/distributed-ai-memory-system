@@ -73,6 +73,49 @@ Read memory back and summarize exactly what changed: entities added,
 entities updated, new relations/observations, and anything you decided
 not to add and why.`;
 
+const AUTO_SYNC_TEMPLATE = `I want you to set up continuous memory syncing for this project in my
+distributed-ai-memory-system (the "dams" MCP server) — going forward, you
+should proactively notice when something worth remembering changes in
+this codebase and ask me whether to sync it, instead of only syncing
+when I explicitly run the sync prompt.
+
+Step 0 — connection check
+Run \`claude mcp list\`. If "dams" isn't listed or shows disconnected, tell
+me and stop.
+
+Step 1 — find where to record this instruction
+Check whether CLAUDE.md and/or AGENTS.md exist at the repo root.
+- If only one exists, use that one.
+- If both exist, ask me which one to add this to before writing anything.
+- If neither exists, ask me whether to create one (and which filename)
+  before writing anything.
+Never guess — this becomes a standing instruction future sessions read
+and act on, so getting the file wrong means it's silently never followed.
+
+Step 2 — append the standing instruction
+Add a section (creating one if the file doesn't have one yet) along
+these lines, with the actual project slug substituted in:
+
+    ## Memory sync ("{PROJECT_SLUG}")
+    This project's memory lives in the distributed-ai-memory-system
+    ("dams" MCP server) under the slug "{PROJECT_SLUG}". Whenever you
+    make or notice a change worth remembering — a new component, a
+    changed architectural decision, a new convention, a resolved
+    gotcha — ask me whether to sync it into memory before doing so.
+    Call read_memory first so you don't propose something that's
+    already there. Never call append_memory or update_entity without
+    my explicit approval in that moment, even though this instruction
+    says to watch proactively — approval is per-change, not blanket.
+
+Step 3 — confirm
+Show me the diff of what you added and where, then read the file back
+to confirm it's actually there.
+
+From this point on, in every session on this repo: watch for changes
+worth remembering, ask before syncing, never sync silently — this
+should feel like a CI check that always asks first, not automation
+that runs unattended.`;
+
 function substituteSlug(template: string, slug: string): string {
   return template.split("{PROJECT_SLUG}").join(slug);
 }
@@ -83,4 +126,8 @@ export function seedPrompt(slug: string): string {
 
 export function syncPrompt(slug: string): string {
   return substituteSlug(SYNC_TEMPLATE, slug);
+}
+
+export function autoSyncPrompt(slug: string): string {
+  return substituteSlug(AUTO_SYNC_TEMPLATE, slug);
 }

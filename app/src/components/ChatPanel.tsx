@@ -1,12 +1,14 @@
-import { useState, type FormEvent, type KeyboardEvent } from "react";
-import { api, type ChatSource, type MemoryEntry, type ProposedAction } from "@/api";
+import { useEffect, useState, type FormEvent, type KeyboardEvent } from "react";
+import { api, type ChatResponse, type ChatSource, type MemoryEntry, type ProposedAction } from "@/api";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { renderMarkdown } from "@/lib/markdown";
 import { CATEGORY_ICONS, categoryColor, categoryOf, resolveSourceEntity } from "@/lib/memory";
 import { cn } from "@/lib/utils";
-import { Paperclip, SendHorizontal, Sparkles } from "lucide-react";
+import { SendHorizontal, Sparkles, X } from "lucide-react";
 import { FileText, GitBranch, StickyNote } from "lucide-react";
 
 type ActionStatus = "pending" | "approved" | "rejected" | "error";
@@ -86,24 +88,29 @@ function ProposedActionCard({
   );
 }
 
-// ChatService.ask dumps every memory entry AND every project doc into its
-// context on every question — there's no picker, nothing is excluded. These
-// only describe that so it's visible in the UI; neither controls it.
-function contextParts(entryCount: number, docCount: number): string[] {
+// ChatService.ask dumps every memory entry into its context on every
+// question — always, no picker. Docs work the same way UNLESS `scopedDoc`
+// is set, in which case only that one file is read (see ChatPanel's
+// doc-picker popover and ChatService.buildDocsContext on the backend).
+function contextParts(entryCount: number, docCount: number, scopedDoc: string | null): string[] {
   const parts: string[] = [];
   if (entryCount > 0) parts.push(`${entryCount} memory ${entryCount === 1 ? "entry" : "entries"}`);
-  if (docCount > 0) parts.push(`${docCount} ${docCount === 1 ? "doc" : "docs"}`);
+  if (scopedDoc) parts.push(`just "${scopedDoc}"`);
+  else if (docCount > 0) parts.push(`${docCount} ${docCount === 1 ? "doc" : "docs"}`);
   return parts;
 }
 
-function contextSummary(entryCount: number, docCount: number): string {
-  const parts = contextParts(entryCount, docCount);
+function contextSummary(entryCount: number, docCount: number, scopedDoc: string | null): string {
+  const parts = contextParts(entryCount, docCount, scopedDoc);
   if (parts.length === 0) return "This project has no memory or docs recorded yet.";
-  return `This chat sees ${parts.join(" and ")} from this project on every question — nothing to select, it's all included automatically.`;
+  const tail = scopedDoc
+    ? "memory is always included; pick the doc icon to change or clear the scope."
+    : "nothing to select, it's all included automatically.";
+  return `This chat sees ${parts.join(" and ")} from this project on every question — ${tail}`;
 }
 
-function loadingLabel(entryCount: number, docCount: number): string {
-  const parts = contextParts(entryCount, docCount);
+function loadingLabel(entryCount: number, docCount: number, scopedDoc: string | null): string {
+  const parts = contextParts(entryCount, docCount, scopedDoc);
   return parts.length === 0 ? "Thinking…" : `Reading ${parts.join(" and ")}…`;
 }
 
@@ -157,19 +164,37 @@ function KeyReferences({
 export function ChatPanel({
   slug,
   entries,
-  docCount,
+  docFilenames,
   onJumpToEntity,
+  ask,
 }: {
-  slug: string;
+  // Only needed for approving a proposed doc edit (updateDoc/deleteDoc) —
+  // undefined in a read-only context (a share link), where the model is
+  // never offered those tools in the first place, so proposedAction can
+  // never actually occur and this is never read.
+  slug?: string;
   entries: MemoryEntry[];
-  docCount: number;
+  docFilenames: string[];
   onJumpToEntity: (name: string) => void;
+  // How to actually ask the question — the authenticated project route or
+  // the public share-token route, depending on where this panel is mounted.
+  ask: (question: string, docFilename?: string) => Promise<ChatResponse>;
 }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [scopedDoc, setScopedDoc] = useState<string | null>(null);
+  const [docPickerOpen, setDocPickerOpen] = useState(false);
   const entryCount = entries.length;
+  const docCount = docFilenames.length;
+
+  // Switching projects (or the scoped doc getting deleted/renamed) can
+  // leave this pointing at a file that's no longer there — drop it rather
+  // than silently keep sending a stale filename.
+  useEffect(() => {
+    if (scopedDoc && !docFilenames.includes(scopedDoc)) setScopedDoc(null);
+  }, [docFilenames, scopedDoc]);
 
   async function submit() {
     const trimmed = question.trim();
@@ -181,7 +206,7 @@ export function ChatPanel({
     setError(null);
 
     try {
-      const { answer, sources, proposedAction } = await api.askChat(slug, trimmed);
+      const { answer, sources, proposedAction } = await ask(trimmed, scopedDoc ?? undefined);
       setMessages((prev) => [
         ...prev,
         {
@@ -212,6 +237,11 @@ export function ChatPanel({
   }
 
   async function handleApprove(index: number, action: ProposedAction) {
+    // Unreachable in practice — a proposedAction can only exist when the
+    // model was offered the update_doc/delete_doc tools, which only
+    // happens with a project slug in the first place. Guarded anyway
+    // rather than asserting, since `slug` is optional on this component.
+    if (!slug) return;
     try {
       if (action.tool === "update_doc") {
         await api.updateDoc(slug, action.input.filename, action.input.content);
@@ -244,7 +274,7 @@ export function ChatPanel({
 
   return (
     <div className="flex h-full flex-col gap-3">
-      <p className="text-xs text-muted-foreground">{contextSummary(entryCount, docCount)}</p>
+      <p className="text-xs text-muted-foreground">{contextSummary(entryCount, docCount, scopedDoc)}</p>
       <ScrollArea className="min-h-0 flex-1 rounded-xl border border-border">
         <div className="flex flex-col gap-4 p-4">
           {messages.length === 0 && (
@@ -293,21 +323,87 @@ export function ChatPanel({
           {loading && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Sparkles className="size-3.5 animate-pulse" />
-              {loadingLabel(entryCount, docCount)}
+              {loadingLabel(entryCount, docCount, scopedDoc)}
             </div>
           )}
           {error && <p className="text-sm text-destructive">{error}</p>}
         </div>
       </ScrollArea>
+      {scopedDoc && (
+        <Badge variant="secondary" className="w-fit gap-1 pr-1">
+          <FileText className="size-3" />
+          Scoped to {scopedDoc}
+          <button
+            type="button"
+            onClick={() => setScopedDoc(null)}
+            aria-label="Clear doc scope"
+            className="rounded-full p-0.5 hover:bg-foreground/15"
+          >
+            <X className="size-3" />
+          </button>
+        </Badge>
+      )}
       <form onSubmit={handleSubmit} className="flex items-center gap-1.5 rounded-xl border border-border bg-card p-1.5">
-        <Button type="button" variant="ghost" size="icon-sm" title="Attachments aren't supported yet" disabled className="shrink-0">
-          <Paperclip className="size-4" />
-        </Button>
+        <Popover open={docPickerOpen} onOpenChange={setDocPickerOpen}>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant={scopedDoc ? "secondary" : "ghost"}
+              size="icon-sm"
+              title={scopedDoc ? `Scoped to ${scopedDoc} — click to change` : "Scope this chat to one doc"}
+              className="shrink-0"
+              disabled={docCount === 0}
+            >
+              <FileText className="size-4" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="w-64">
+            <p className="px-1 pb-1 text-xs font-medium text-muted-foreground">Scope chat to a doc</p>
+            {docFilenames.length === 0 ? (
+              <p className="px-1 py-1 text-xs text-muted-foreground">No docs in this project yet.</p>
+            ) : (
+              <div className="flex flex-col gap-0.5">
+                {docFilenames.map((filename) => (
+                  <button
+                    key={filename}
+                    type="button"
+                    onClick={() => {
+                      setScopedDoc(filename);
+                      setDocPickerOpen(false);
+                    }}
+                    className={cn(
+                      "flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted",
+                      scopedDoc === filename && "bg-muted font-medium",
+                    )}
+                  >
+                    <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1 truncate font-mono">{filename}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {scopedDoc && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="mt-1 w-full justify-start gap-1.5 text-muted-foreground"
+                onClick={() => {
+                  setScopedDoc(null);
+                  setDocPickerOpen(false);
+                }}
+              >
+                <X className="size-3.5" />
+                Clear — use all docs
+              </Button>
+            )}
+          </PopoverContent>
+        </Popover>
         <Input
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Ask this project's memory something…"
+          placeholder={scopedDoc ? `Ask about ${scopedDoc}…` : "Ask this project's memory something…"}
           className="border-0 bg-transparent shadow-none focus-visible:ring-0"
         />
         <Button type="submit" size="icon-sm" disabled={loading || !question.trim()} title="Send (⌘⏎)" className="shrink-0">

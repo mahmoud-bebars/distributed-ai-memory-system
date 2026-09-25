@@ -90,18 +90,32 @@
 
 ## Shareable read-only links
 
-- `src/modules/shares` (4-file pattern) owns a project's one active share
-  link: `SharesService.create` upserts a `crypto.randomUUID()` token into
-  the `project_shares` D1 table (slug PK — a new token replaces the old
-  one, so "regenerate" is just calling create again), `.revoke` deletes
-  the row, `.resolveProjectByToken` is the public lookup path.
+- `src/modules/shares` (4-file pattern) owns a project's share links — a
+  project can have any number of them (`project_shares`, `token` as PK,
+  not `slug`; migration `0003_share_links.sql`). Each link is independently
+  configured: a `label`, `allowChat`/`allowDocs` booleans, and an
+  `expiresAt` (nullable — null means never). `SharesService.create`/
+  `.update`/`.revoke`/`.list` are straightforward CRUD; `.resolveByToken`
+  is the public lookup path and is where expiry is enforced (an expired
+  link resolves to `null`, same as a token that never existed).
+- Graph + Entries (i.e. project memory) has no per-link gate — sharing at
+  all means sharing at least that. Docs and Chat are opt-in per link via
+  `allowDocs`/`allowChat`, enforced server-side on the public routes
+  themselves (`/api/share/:token/docs*`, `/api/share/:token/chat`), not
+  just hidden in the frontend. `.../chat` reuses `ChatService.ask` with
+  `allowMutatingTools: false` (no update_doc/delete_doc tools offered —
+  there's no approve/reject UI on a read-only share to act on one anyway)
+  and `includeDocs: share.allowDocs` (a docs-off link keeps doc content
+  out of chat answers too, not just out of the Docs tab).
 - Two route groups, both mounted in `src/index.ts`: `projectShareRoutes`
-  (`GET`/`POST`/`DELETE /api/projects/:slug/share`, authenticated the same
-  loose way the rest of `/api/*` is) and `publicShareRoutes`
-  (`GET /api/share/:token/memory`, deliberately unauthenticated — the
-  token *is* the auth). An unknown or missing token always 404s with a
-  generic body; never branch differently for "token doesn't exist" vs.
-  any other failure, so a guess can't learn anything from the response.
+  (`GET`/`POST /api/projects/:slug/share`, `PATCH`/`DELETE
+  /api/projects/:slug/share/:token`, authenticated the same loose way the
+  rest of `/api/*` is) and `publicShareRoutes` (`GET /api/share/:token` for
+  link metadata, `GET /api/share/:token/memory`, docs, and
+  `POST /api/share/:token/chat`, deliberately unauthenticated — the token
+  *is* the auth). An unknown, expired, or permission-gated-off token always
+  404s with the same generic body; never branch differently between those
+  cases, so a guess can't learn anything from the response.
 - `shareUrl()` in `shares/service.ts` hardcodes the share host as
   `mcp.mahmoudbebars.dev` — that's the one custom domain (see
   `wrangler.toml`'s `routes`) deliberately left outside Cloudflare Access,
@@ -142,13 +156,20 @@
   page load of `/share/:token` (a client-side-only route, no matching
   static file) falls back to `index.html` instead of 404ing.
 - Frontend: `app/src/main.tsx` does a plain path check
-  (`/^\/share\/([^/]+)/`) — no router library — and renders
-  `ShareView` instead of `App` when it matches. `ShareView` reuses
-  `MemoryGraph`/`EntriesTable` as-is (both are already read-only) but
-  fetches from `api.getShareMemory(token)` and renders no sidebar, no
-  Chat tab, no Export, no create-project form. The authenticated app gets
-  a `ShareDialog` (per-project "Share" button) for generating/copying/
-  revoking the link instead.
+  (`/^\/share\/([^/]+)/`) — no router library — and renders `ShareView`
+  instead of `App` when it matches. `ShareView` first calls
+  `api.getShareMeta(token)` to learn which tabs it's allowed to offer
+  *before* rendering the tab list at all, so a docs-off/chat-off link never
+  even shows those triggers rather than showing-then-hiding them. It
+  reuses `MemoryGraph`/`EntriesTable`/`DocsPanel` (all already read-only)
+  and, for a chat-enabled link, `ChatPanel` — the same component the
+  authenticated view uses, made source-agnostic via its `ask` prop
+  (`ProjectView` passes `api.askChat`, `ShareView` passes
+  `api.askShareChat`) rather than hardcoding which endpoint to call.
+  Always no create-project form, no Export, no mutating doc controls
+  regardless of link settings. The authenticated app manages links (plural
+  now) through `ShareDialog`, opened from `ProjectView`'s consolidated
+  actions dropdown — create/edit/revoke any number of them per project.
 
 ## Frontend conventions (shadcn/ui)
 
