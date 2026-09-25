@@ -23,7 +23,7 @@ binding = "OAUTH_KV"
 id = "<YOUR_KV_NAMESPACE_ID>"                  # wrangler kv namespace create OAUTH_KV
 
 [assets]
-directory = "./app/dist"
+directory = "../client/dist"
 binding = "ASSETS"
 # Needed for /share/:token — it's a client-side-only route (no matching
 # static file), so a direct page load must fall back to index.html and let

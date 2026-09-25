@@ -74,7 +74,7 @@ REST API (projects CRUD, memory read/append, plus a raw
 object byte-for-byte for backup/export) and chat-with-memory are built
 and deployed.
 
-The web UI (`app/`) got a full pass: shadcn/ui components, a persistent
+The web UI (`client/`) got a full pass: shadcn/ui components, a persistent
 project sidebar instead of list/detail toggling, a Graph/Entries/Chat/
 Prompts tab layout per project, an interactive memory graph (drag, zoom,
 search, click-to-inspect side panel), a raw Entries table with type/text
@@ -82,8 +82,8 @@ filtering, a manual refresh control, and an Export control (pretty JSON
 of the fetched view, or the byte-for-byte raw `.jsonl` from the raw
 route).
 
-The **MCP layer and OAuth are now built** (`src/modules/mcp` and
-`src/modules/auth`). `/mcp` exposes five tools — `list_projects`,
+The **MCP layer and OAuth are now built** (`server/src/modules/mcp` and
+`server/src/modules/auth`). `/mcp` exposes five tools — `list_projects`,
 `read_memory`, `append_memory`, `update_entity`, `ask_memory` — as thin
 wrappers over the existing services (no `create_project`; project
 creation stays REST-only). It runs stateless per the MCP 2026-07-28 spec:
@@ -100,8 +100,8 @@ outside it, gated instead by a path-scoped Access bypass policy
 (`/mcp`, `/.well-known/*`, `/authorize`, `/token`, `/register`,
 `/callback` — configured in the dashboard, not in this repo).
 
-**Shareable read-only project links are now built** (`src/modules/shares`,
-`app/src/components/ShareView.tsx`/`ShareDialog.tsx`). A project owner
+**Shareable read-only project links are now built** (`server/src/modules/shares`,
+`client/src/components/ShareView.tsx`/`ShareDialog.tsx`). A project owner
 generates an unguessable token from the authenticated app; anyone with
 `https://mcp.mahmoudbebars.dev/share/:token` sees that one project's
 Graph and Entries tabs, read-only, with no login and no visibility into

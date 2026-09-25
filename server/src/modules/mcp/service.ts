@@ -43,7 +43,7 @@ const errorResult = (message: string) => ({
  * The tools are deliberately thin wrappers over `ProjectsService` /
  * `ChatService` — no business logic lives here. This is the "MCP is a
  * protocol wrapper, the REST layer is the real implementation" decision from
- * PROJECT_UNDERSTANDING.md made concrete. Notably absent: `create_project`,
+ * docs/PROJECT_UNDERSTANDING.md made concrete. Notably absent: `create_project`,
  * which stays a deliberate REST-API action rather than something an AI client
  * does unprompted.
  *

@@ -19,34 +19,45 @@ Deployed at `memory.mahmoudbebars.dev`.
 
 ## Local development
 
+This is an npm workspaces monorepo — one `npm install` at the repo root
+installs both workspaces, and the root `package.json` scripts delegate to
+whichever workspace they belong to.
+
 ```
-cp wrangler.toml.example wrangler.toml   # fill in your own D1/KV ids — see DEPLOY.md
+cp server/wrangler.toml.example server/wrangler.toml   # fill in your own D1/KV ids — see docs/DEPLOY.md
 npm install
 npm run db:migrate:local
-npm run dev            # Worker on :8787
+npm run dev            # Worker on :8787 (server workspace)
 
-cd app && npm install && npm run dev   # frontend on :5173, proxies /api to :8787
+npm run dev:client     # frontend on :5173, proxies /api to :8787
 ```
 
 ## First deploy
 
-See DEPLOY.md.
+See [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ## Project structure
 
 ```
-src/
-  index.ts              Worker entry — mounts /api routes, falls back to ASSETS
-  lib/bindings.ts        Shared Env/Bindings type (D1, R2, ASSETS, API key)
-  db/schema.ts            Drizzle table definitions
-  modules/
-    projects/            4-file module: schema.ts, service.ts, routes.ts, index.ts
-    chat/                 Same pattern — Anthropic API chat over a project's memory
-migrations/               D1 migrations (wrangler-managed)
-app/                       Vite/React frontend, built into app/dist and served by the Worker
+server/                    Cloudflare Worker backend (Hono + D1 + R2)
+  wrangler.toml              Worker config (git-ignored, copy from wrangler.toml.example)
+  src/
+    index.ts                 Worker entry — mounts /api routes, falls back to ASSETS
+    lib/bindings.ts           Shared Env/Bindings type (D1, R2, ASSETS, API key)
+    db/schema.ts               Drizzle table definitions
+    modules/
+      projects/               4-file module: schema.ts, service.ts, routes.ts, index.ts
+      chat/                    Same pattern — Anthropic API chat over a project's memory
+  migrations/                D1 migrations (wrangler-managed)
+client/                    Vite/React frontend, built into client/dist and served by the Worker
 ```
+
+## Documentation
+
+See [docs/](docs/) for architecture, deployment, design, and setup guides.
+Contributing? See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Status
 
-See PROJECT_UNDERSTANDING.md for the full architecture and what's still
-ahead (MCP tool layer, OAuth, sync CLI).
+See [docs/PROJECT_UNDERSTANDING.md](docs/PROJECT_UNDERSTANDING.md) for the
+full architecture and what's still ahead (MCP tool layer, OAuth, sync CLI).

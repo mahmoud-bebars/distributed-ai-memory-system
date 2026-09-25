@@ -1,6 +1,6 @@
 # DESIGN.md — DAMS web UI
 
-The visual system for `app/`, adopted in a full redesign pass. It replaces
+The visual system for `client/`, adopted in a full redesign pass. It replaces
 the previous flat-border shadcn default theme with a near-black,
 high-contrast theme built around three semantic accent hues and soft
 ambient glow instead of hard borders for emphasis.
@@ -9,14 +9,14 @@ If you're asked to add or change UI and want it to look native to the app,
 following this document should be enough — you shouldn't need to re-derive
 the look from screenshots or prior conversation.
 
-All tokens live in `app/src/index.css`. Everything below is a description
+All tokens live in `client/src/index.css`. Everything below is a description
 of what's there and why, not a separate source of truth — if this doc and
 the CSS ever disagree, the CSS is what's shipping; update this file to match.
 
 ## Color tokens
 
 Defined as CSS custom properties on `:root` (light) and `.dark` (dark,
-default — see `app/src/main.tsx`'s `defaultTheme="dark"`), then re-exposed
+default — see `client/src/main.tsx`'s `defaultTheme="dark"`), then re-exposed
 as Tailwind utilities via `@theme inline` in `index.css`, exactly like the
 shadcn baseline this was built from. Use the Tailwind utility
 (`bg-card`, `text-muted-foreground`, `border-border`) in components; reach
@@ -55,7 +55,7 @@ don't mean anything outside that context:
 - **Teal** — storage / docs / features. Used for the `feature` entity
   category; reach for it first if you add a docs-adjacent accent.
 
-Category → hue mapping lives in `CATEGORY_HUES` in `app/src/lib/memory.ts`
+Category → hue mapping lives in `CATEGORY_HUES` in `client/src/lib/memory.ts`
 (`categoryColor(category)` resolves a category straight to its CSS var).
 `other` deliberately gets no accent — it renders in
 `var(--muted-foreground)` so uncategorized entities (common; see
@@ -63,7 +63,7 @@ Category → hue mapping lives in `CATEGORY_HUES` in `app/src/lib/memory.ts`
 compete with intentionally-categorized ones.
 
 Project sidebar icons cycle through all nine hues by hashing the project
-slug (`app/src/lib/palette.ts`'s `hueFor`) — deterministic per project
+slug (`client/src/lib/palette.ts`'s `hueFor`) — deterministic per project
 regardless of list order, not tied to category semantics.
 
 ### Ambient glow
@@ -252,7 +252,7 @@ public `/share/:token` page) passes, and it hides every mutating control
 (Edit, Delete, the append box, "New doc") — but that's a UI convenience,
 not the actual boundary: the backend's public share-docs routes
 (`GET /api/share/:token/docs` and `.../docs/:filename`, in
-`src/modules/shares/routes.ts`) only implement `GET`, so there is no
+`server/src/modules/shares/routes.ts`) only implement `GET`, so there is no
 append/update/delete endpoint for a share token to call even if a future
 UI change forgot to hide those buttons. Keep it that way — don't add
 mutating routes under `/api/share/*` "for convenience" without deliberately
@@ -288,7 +288,7 @@ each source gets an icon by memory-entry type (`FileText`/entity,
 `GitBranch`/relation, `StickyNote`/observation), colored by category when
 it resolves to one, and the summary text `ChatSource` already carries.
 **There's no per-source project name, date, or page number** — unlike the
-reference mockup, `ChatSource` (`src/modules/chat/schema.ts`) only carries
+reference mockup, `ChatSource` (`server/src/modules/chat/schema.ts`) only carries
 `{ id, type, summary }`, and citations only ever point at this project's
 own memory entries, never at docs (`ChatService` never cites a doc — see
 `extractSources`). Don't fabricate those fields client-side; if per-source

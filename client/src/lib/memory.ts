@@ -35,7 +35,7 @@ export type EntityCategory = (typeof ENTITY_CATEGORIES)[number];
 export const DEFAULT_ENTITY_CATEGORY: EntityCategory = "other";
 
 // Each entity category maps to one of the theme's semantic accent hues
-// (see DESIGN.md) plus a representative icon, used by the graph nodes,
+// (see docs/DESIGN.md) plus a representative icon, used by the graph nodes,
 // category badges, and legends. "other" deliberately falls back to the
 // neutral muted-foreground tone rather than an accent, so uncategorized
 // entities (common — see EntityCategory's docs) don't visually compete

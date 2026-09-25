@@ -1,5 +1,15 @@
 # Instructions for Claude Code working in this repo
 
+## Repo layout
+
+npm workspaces monorepo, two workspaces under one root `package.json`:
+`server/` (the Cloudflare Worker — Hono, D1, R2, MCP/OAuth) and `client/`
+(the Vite/React frontend, built into `client/dist` and served by the Worker
+as static assets). Run `npm install` once from the repo root. Root-level
+`npm run <script>` commands delegate to the right workspace — see
+"Commands" below. `wrangler.toml` and its CLI (`wrangler d1 ...`,
+`wrangler secret put ...`) live in and must run from `server/`.
+
 ## Hard preferences (non-negotiable, apply repo-wide)
 
 - npm only — never yarn or pnpm
@@ -10,7 +20,7 @@
   types), `service.ts` (business logic, D1/R2 access), `routes.ts` (Hono
   handlers), `index.ts` (barrel export). Don't collapse these into one file
   even for small modules.
-- Shared `Bindings`/`Env` type lives in `src/lib/bindings.ts` — modules
+- Shared `Bindings`/`Env` type lives in `server/src/lib/bindings.ts` — modules
   import from there, they don't declare their own.
 
 ## Data model rules
@@ -22,12 +32,12 @@
   "edit" an entry, append a new one and treat resolution as an
   application-level concern, not a storage-level overwrite.
 - Memory entries have a `type` of `entity`, `relation`, or `observation`.
-  The frontend graph (`app/src/components/MemoryGraph.tsx`) assumes entity
+  The frontend graph (`client/src/components/MemoryGraph.tsx`) assumes entity
   entries carry a `name` and relation entries carry `source`/`target`
   matching entity names — if you change entry shapes, update that
   assumption or the graph silently renders nothing.
 - Content shape conventions by type (documented, not Zod-enforced — see
-  `memoryEntrySchema` in `src/modules/projects/schema.ts` — enforcing them
+  `memoryEntrySchema` in `server/src/modules/projects/schema.ts` — enforcing them
   strictly would reject entries written before the convention existed):
   - `entity`: `{ name, category? }`. `category` is one of
     `entityCategorySchema`'s ten values; readers default to `"other"`
@@ -45,12 +55,12 @@
   never filtered), but any reader building a "current" view (the frontend
   graph/entries table, `update_entity`) should dedupe by `content.name`
   and keep the last occurrence in file order. The canonical implementation
-  is `currentEntities()`, duplicated in `src/modules/projects/service.ts`
-  (backend) and `app/src/lib/memory.ts` (frontend, which doesn't build
+  is `currentEntities()`, duplicated in `server/src/modules/projects/service.ts`
+  (backend) and `client/src/lib/memory.ts` (frontend, which doesn't build
   against the Worker's source tree) — keep both in sync if the rule
   changes. Relations and observations are never deduped; every one is
   part of the log.
-- `update_entity` (MCP tool, `src/modules/mcp`) is how a category (or any
+- `update_entity` (MCP tool, `server/src/modules/mcp`) is how a category (or any
   other entity field) gets attached after the fact: it appends a new
   entity revision merging the given fields onto the entity's current
   content. It fails clearly if no entity with that name exists yet —
@@ -58,7 +68,7 @@
 
 ## MCP + OAuth conventions (added with the /mcp layer)
 
-- MCP tools are thin wrappers, no new logic. `src/modules/mcp` follows the
+- MCP tools are thin wrappers, no new logic. `server/src/modules/mcp` follows the
   4-file pattern with one adaptation: `service.ts` exports a
   `buildMemoryMcpServer(env)` factory that registers tools by delegating
   straight to `ProjectsService`/`ChatService`, and `routes.ts` exports a
@@ -73,24 +83,24 @@
 - Always pass `CfWorkerJsonSchemaValidator` to `new McpServer`. The SDK's
   Ajv default compiles schemas with `new Function`, which the Workers
   runtime forbids.
-- Tool input schemas live in `mcp/schema.ts` as Zod *raw shapes* (what
+- Tool input schemas live in `server/src/modules/mcp/schema.ts` as Zod *raw shapes* (what
   `registerTool` expects), and `append_memory` reuses `memoryEntrySchema`
   from the projects module rather than redefining the entry shape.
   `update_entity` similarly reuses `entityCategorySchema`.
-- OAuth wiring lives in `src/modules/auth`. `workers-oauth-utils.ts` is
+- OAuth wiring lives in `server/src/modules/auth`. `workers-oauth-utils.ts` is
   vendored from Cloudflare's `remote-mcp-github-oauth` reference (CSRF +
   session-bound state + signed approval cookies) — treat it as vendored
   code, keep changes minimal. `github-handler.ts` owns `/authorize` and
   `/callback`; the single-user allow-list (`ALLOWED_GITHUB_USER`) is
   enforced in `/callback`, the first point we know the real GitHub login.
-- Only `/mcp` is gated. In `src/index.ts` the whole existing Hono app
+- Only `/mcp` is gated. In `server/src/index.ts` the whole existing Hono app
   (REST + auth routes + asset fallback) is the OAuthProvider
   `defaultHandler`; `apiRoute` is `/mcp` alone. Never widen `apiRoute` to
   cover `/api/*` or the assets — those stay unauthenticated by design.
 
 ## Shareable read-only links
 
-- `src/modules/shares` (4-file pattern) owns a project's share links — a
+- `server/src/modules/shares` (4-file pattern) owns a project's share links — a
   project can have any number of them (`project_shares`, `token` as PK,
   not `slug`; migration `0003_share_links.sql`). Each link is independently
   configured: a `label`, `allowChat`/`allowDocs` booleans, and an
@@ -107,7 +117,7 @@
   there's no approve/reject UI on a read-only share to act on one anyway)
   and `includeDocs: share.allowDocs` (a docs-off link keeps doc content
   out of chat answers too, not just out of the Docs tab).
-- Two route groups, both mounted in `src/index.ts`: `projectShareRoutes`
+- Two route groups, both mounted in `server/src/index.ts`: `projectShareRoutes`
   (`GET`/`POST /api/projects/:slug/share`, `PATCH`/`DELETE
   /api/projects/:slug/share/:token`, authenticated the same loose way the
   rest of `/api/*` is) and `publicShareRoutes` (`GET /api/share/:token` for
@@ -116,9 +126,9 @@
   *is* the auth). An unknown, expired, or permission-gated-off token always
   404s with the same generic body; never branch differently between those
   cases, so a guess can't learn anything from the response.
-- `shareUrl()` in `shares/service.ts` hardcodes the share host as
-  `mcp.mahmoudbebars.dev` — that's the one custom domain (see
-  `wrangler.toml`'s `routes`) deliberately left outside Cloudflare Access,
+- `shareUrl()` in `server/src/modules/shares/service.ts` hardcodes the share
+  host as `mcp.mahmoudbebars.dev` — that's the one custom domain (see
+  `server/wrangler.toml`'s `routes`) deliberately left outside Cloudflare Access,
   because a share recipient has no Access login to give. **The Access
   application for that hostname is configured in the Cloudflare
   dashboard, not in this repo** — it bypasses auth only for
@@ -127,7 +137,7 @@
   same bypass list by hand. No amount of Worker code changes this; the
   Access check happens at Cloudflare's edge before a request ever reaches
   this Worker.
-- **In-code host guard, `src/index.ts` (added 2026-09-08).** When this was
+- **In-code host guard, `server/src/index.ts` (added 2026-09-08).** When this was
   built, `mcp.mahmoudbebars.dev` turned out to have no working Access
   restriction at all — the full REST API, reads and writes, was reachable
   there unauthenticated. A `Hono` middleware (first thing registered on
@@ -151,11 +161,11 @@
   dev`: Miniflare doesn't forward a client-supplied `Host` header into
   the Worker's request, so local `curl -H "Host: ..."` spoofing can't
   actually exercise this logic.
-- `wrangler.toml`'s `[assets]` sets
+- `server/wrangler.toml`'s `[assets]` sets
   `not_found_handling = "single-page-application"` specifically so a cold
   page load of `/share/:token` (a client-side-only route, no matching
   static file) falls back to `index.html` instead of 404ing.
-- Frontend: `app/src/main.tsx` does a plain path check
+- Frontend: `client/src/main.tsx` does a plain path check
   (`/^\/share\/([^/]+)/`) — no router library — and renders `ShareView`
   instead of `App` when it matches. `ShareView` first calls
   `api.getShareMeta(token)` to learn which tabs it's allowed to offer
@@ -173,30 +183,30 @@
 
 ## Frontend conventions (shadcn/ui)
 
-- `app/` uses shadcn/ui (CLI-managed, `radix-nova` preset) on top of
+- `client/` uses shadcn/ui (CLI-managed, `radix-nova` preset) on top of
   **Tailwind v4**, not v3 — v4 was the CLI's current default when this was
   set up, and its generated components rely on v4-only CSS (`@theme`,
   `@custom-variant`). Don't reintroduce a v3 `tailwind.config.js`; theming
-  lives in `app/src/index.css` via `@theme inline` + CSS custom properties.
+  lives in `client/src/index.css` via `@theme inline` + CSS custom properties.
   Styling is driven by `@tailwindcss/vite`, not postcss — there's no
   `postcss.config.js`.
-- Primitives live in `app/src/components/ui/` and are installed with
-  `npx shadcn@latest add <component>` from inside `app/` — never
+- Primitives live in `client/src/components/ui/` and are installed with
+  `npx shadcn@latest add <component>` from inside `client/` — never
   hand-write a component that mimics shadcn's API; add it with the CLI so
   it stays in sync with `components.json`.
-- Path alias `@/*` → `app/src/*` (see `app/tsconfig.json` and
-  `app/vite.config.ts`) — shadcn components import via `@/lib/utils` etc.,
+- Path alias `@/*` → `client/src/*` (see `client/tsconfig.json` and
+  `client/vite.config.ts`) — shadcn components import via `@/lib/utils` etc.,
   so new files should follow that convention too.
 - Layout is sidebar + tabs, not the old list/detail toggle: `AppSidebar`
   (project switcher) wraps `SidebarProvider`/`SidebarInset`, and
   `ProjectView` renders `Tabs` (Graph / Entries / Chat / Prompts) plus the
   Share and Export controls, per project.
 - Guide and prompt-template content lives in the app itself, not this
-  repo's docs: `app/src/components/GuidePage.tsx` (linked from the
+  repo's docs: `client/src/components/GuidePage.tsx` (linked from the
   sidebar, next to "New project") documents the MCP connect command, the
   `/mcp` auth flow, and the actual tool list — kept in sync **by hand**
-  with `src/modules/mcp/service.ts`'s `registerTool` calls, since there's
-  no build-time link between them. `app/src/lib/prompts.ts` holds the
+  with `server/src/modules/mcp/service.ts`'s `registerTool` calls, since there's
+  no build-time link between them. `client/src/lib/prompts.ts` holds the
   seed/sync prompt templates (`{PROJECT_SLUG}` substituted per project),
   rendered in `ProjectView`'s Prompts tab via `PromptsPanel`.
 
@@ -211,22 +221,29 @@
 
 ## Commands
 
+This is an npm workspaces monorepo: `server/` (the Worker) and `client/`
+(the frontend) are both workspaces under the root `package.json`. Run
+`npm install` once from the repo root — it installs both. The commands
+below run from the repo root and delegate to the right workspace; they're
+thin wrappers over the corresponding script in `server/package.json` or
+`client/package.json`.
+
 ```
-npm run dev                  # Worker dev server
-npm run db:generate          # after editing src/db/schema.ts — see note below
+npm run dev                  # Worker dev server (server workspace)
+npm run dev:client           # frontend dev server (proxies /api to :8787)
+npm run db:generate          # after editing server/src/db/schema.ts — see note below
 npm run db:migrate:local
 npm run db:migrate:remote
-npm run deploy
-cd app && npm run dev        # frontend dev server (proxies /api to :8787)
-cd app && npm run build      # required before npm run deploy
+npm run build                # builds the client workspace into client/dist
+npm run deploy                # builds client, then wrangler deploy in server/
 ```
 
 `db:generate` (`drizzle-kit generate`) only works cleanly if
-`migrations/meta/` exists and tracks prior migrations. It doesn't here —
-`0001_init.sql` was hand-written, so running `generate` produces a fresh
-"baseline" migration that recreates every table from scratch instead of
-a real diff. When that happens, discard the generated file (and any
-`migrations/meta/` it created) and hand-write the incremental migration
-in the same `CREATE TABLE IF NOT EXISTS` style as the existing ones,
-numbered to follow on (`migrations/0002_project_shares.sql` is the
-example to copy).
+`server/migrations/meta/` exists and tracks prior migrations. It doesn't
+here — `0001_init.sql` was hand-written, so running `generate` produces a
+fresh "baseline" migration that recreates every table from scratch instead
+of a real diff. When that happens, discard the generated file (and any
+`server/migrations/meta/` it created) and hand-write the incremental
+migration in the same `CREATE TABLE IF NOT EXISTS` style as the existing
+ones, numbered to follow on (`server/migrations/0002_project_shares.sql` is
+the example to copy).

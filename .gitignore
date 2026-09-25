@@ -9,7 +9,6 @@ wrangler.toml
 
 # Dependencies & build/runtime artifacts
 node_modules/
-app/node_modules/
-app/dist/
+client/dist/
 .wrangler/
 .DS_Store

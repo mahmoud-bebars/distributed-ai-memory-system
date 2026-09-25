@@ -69,7 +69,7 @@ app.route("/api/share", publicShareRoutes);
 // asset catch-all below, or the wildcard would swallow them.
 app.route("/", githubAuthRoutes);
 
-// Anything else falls through to the built frontend (see app/). Only runs for
+// Anything else falls through to the built frontend (see client/). Only runs for
 // requests Workers Assets didn't already resolve to a static file.
 app.get("*", (c) => c.env.ASSETS.fetch(c.req.raw));
 

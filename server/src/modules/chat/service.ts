@@ -60,7 +60,7 @@ interface AnthropicContentBlock {
 
 /** Short human-readable label for a memory entry, used to show which
  *  entries a chat answer cited — same idea as the frontend's per-type
- *  summaries (app/src/lib/memory.ts), duplicated here since this runs
+ *  summaries (client/src/lib/memory.ts), duplicated here since this runs
  *  server-side before the entry ever reaches the browser. */
 function summarizeEntry(entry: MemoryEntry): string {
   if (entry.type === "entity") {
