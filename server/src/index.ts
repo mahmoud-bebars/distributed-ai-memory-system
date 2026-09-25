@@ -15,37 +15,36 @@ import { projectShareRoutes, publicShareRoutes } from "./modules/shares";
 // and the UI are deliberately NOT behind OAuth.
 const app = new Hono<{ Bindings: Bindings }>();
 
-// Stopgap host guard for mcp.mahmoudbebars.dev.
-//
-// That hostname is supposed to be scoped by a Cloudflare Access application
-// to just the paths listed below (a dashboard setting — see CLAUDE.md's
-// "Shareable read-only links" section). As of 2026-09-08 it turned out that
-// application either doesn't exist or isn't actually restricting anything:
-// the full REST API (reads *and* writes) was reachable there completely
-// unauthenticated. This middleware enforces the same allow-list in code as a
-// belt-and-suspenders measure so a misconfigured or missing Access policy on
-// that hostname can't expose the rest of the app. It is NOT a substitute for
-// fixing the Access application — Access still protects memory.mahmoudbebars.dev,
-// and gates /mcp itself via OAuthProvider below regardless of hostname.
-const MCP_HOSTNAME = "mcp.mahmoudbebars.dev";
-const MCP_HOSTNAME_EXACT_PATHS = new Set(["/mcp", "/authorize", "/token", "/register", "/callback"]);
-const MCP_HOSTNAME_PATH_PREFIXES = ["/.well-known/", "/share/", "/api/share/", "/assets/"];
+// Stopgap host guard for env.SHARE_HOSTNAME (see lib/bindings.ts) — the one
+// hostname, if you've set one, meant to sit outside whatever access control
+// protects your main domain, scoped by that access control (a dashboard
+// setting, not this code — see CLAUDE.md's "Shareable read-only links"
+// section) to just the paths listed below. That access control is the real
+// gate; this middleware enforces the same allow-list in code as a
+// belt-and-suspenders measure so a misconfigured or missing policy on that
+// hostname can't expose the rest of the app. It is NOT a substitute for
+// getting that policy right, and it's a no-op entirely if SHARE_HOSTNAME
+// isn't set — /mcp is still gated by OAuthProvider below regardless.
+const SHARE_HOSTNAME_EXACT_PATHS = new Set(["/mcp", "/authorize", "/token", "/register", "/callback"]);
+const SHARE_HOSTNAME_PATH_PREFIXES = ["/.well-known/", "/share/", "/api/share/", "/assets/"];
 
-function isAllowedOnMcpHostname(pathname: string): boolean {
+function isAllowedOnShareHostname(pathname: string): boolean {
   return (
-    MCP_HOSTNAME_EXACT_PATHS.has(pathname) ||
-    MCP_HOSTNAME_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix))
+    SHARE_HOSTNAME_EXACT_PATHS.has(pathname) ||
+    SHARE_HOSTNAME_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix))
   );
 }
 
 app.use("*", async (c, next) => {
+  const shareHostname = c.env.SHARE_HOSTNAME;
+  if (!shareHostname) return next();
   // The `Host` header, not `new URL(c.req.url).hostname` — under wrangler
   // dev/Miniflare the request URL always reflects the local bind address
   // regardless of what a client sends as Host, so checking the header
   // directly is both what a real Workers Custom Domain routes on and the
   // only thing that's actually testable locally.
   const host = c.req.header("host");
-  if (host === MCP_HOSTNAME && !isAllowedOnMcpHostname(new URL(c.req.url).pathname)) {
+  if (host === shareHostname && !isAllowedOnShareHostname(new URL(c.req.url).pathname)) {
     return c.notFound();
   }
   return next();
@@ -57,12 +56,12 @@ app.route("/api/projects", chatRoutes);
 app.route("/api/projects", projectShareRoutes);
 app.route("/api/projects", docsRoutes);
 
-// Public, token-authed read-only endpoint for share links. Reachable on
-// memory.mahmoudbebars.dev too, but recipients are meant to hit it via
-// mcp.mahmoudbebars.dev/share/:token — the one hostname whose Cloudflare
-// Access application is configured to bypass auth for /share/* and
-// /api/share/* (a dashboard setting, not something this Worker enforces —
-// see CLAUDE.md's share-link notes).
+// Public, token-authed read-only endpoint for share links. Reachable on your
+// main domain too, but recipients are meant to hit it via
+// env.SHARE_HOSTNAME/share/:token (if you've set one) — the one hostname
+// whose access-control application is configured to bypass auth for
+// /share/* and /api/share/* (a dashboard setting, not something this Worker
+// enforces — see CLAUDE.md's share-link notes).
 app.route("/api/share", publicShareRoutes);
 
 // GitHub OAuth endpoints for the /mcp flow. Must be registered before the

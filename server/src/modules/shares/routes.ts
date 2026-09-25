@@ -8,21 +8,22 @@ import { createShareLinkSchema, updateShareLinkSchema } from "./schema";
 import { shareUrl, SharesService } from "./service";
 
 // Mounted at /api/projects — authenticated the same way the rest of the REST
-// API is (i.e. not gated in code; Cloudflare Access on memory.mahmoudbebars.dev
-// is what actually protects these in production).
+// API is (i.e. not gated in code; whatever access control you put in front
+// of your main domain is what actually protects these in production).
 export const projectShareRoutes = new Hono<{ Bindings: Bindings }>();
 
 projectShareRoutes.get("/:slug/share", async (c) => {
   const service = new SharesService(c.env);
   const links = await service.list(c.req.param("slug"));
-  return c.json(links.map((link) => ({ ...link, url: shareUrl(link.token) })));
+  const host = new URL(c.req.url).host;
+  return c.json(links.map((link) => ({ ...link, url: shareUrl(link.token, c.env, host) })));
 });
 
 projectShareRoutes.post("/:slug/share", zValidator("json", createShareLinkSchema), async (c) => {
   const service = new SharesService(c.env);
   try {
     const link = await service.create(c.req.param("slug"), c.req.valid("json"));
-    return c.json({ ...link, url: shareUrl(link.token) }, 201);
+    return c.json({ ...link, url: shareUrl(link.token, c.env, new URL(c.req.url).host) }, 201);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     const status = message.startsWith("Unknown project") ? 404 : 500;
@@ -37,7 +38,7 @@ projectShareRoutes.patch(
     const service = new SharesService(c.env);
     try {
       const link = await service.update(c.req.param("slug"), c.req.param("token"), c.req.valid("json"));
-      return c.json({ ...link, url: shareUrl(link.token) });
+      return c.json({ ...link, url: shareUrl(link.token, c.env, new URL(c.req.url).host) });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
       const status = message.startsWith("Unknown share link") ? 404 : 500;

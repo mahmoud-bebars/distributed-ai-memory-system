@@ -6,7 +6,7 @@ and write structured memory for your projects, backed by D1 (registry) and
 R2 (per-project JSONL blobs). Ships with a small web UI for browsing and
 chatting with a project's memory via the Anthropic API.
 
-Deployed at `memory.mahmoudbebars.dev`.
+Deploy your own instance to any custom domain — see [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ## Stack
 

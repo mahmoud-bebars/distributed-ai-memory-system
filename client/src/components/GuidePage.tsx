@@ -1,7 +1,9 @@
 import { CopyButton } from "@/components/CopyButton";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
-const CONNECT_COMMAND = "claude mcp add --transport http dams https://mcp.mahmoudbebars.dev/mcp --scope user";
+// Built from wherever this page is being served, not hardcoded — a self-hosted
+// deployer's Guide page should show their own domain, not the original author's.
+const CONNECT_COMMAND = `claude mcp add --transport http dams ${window.location.origin}/mcp --scope user`;
 
 // Kept in sync by hand with src/modules/mcp/service.ts's registerTool calls —
 // there's no build-time link between this page and that file, so if a tool

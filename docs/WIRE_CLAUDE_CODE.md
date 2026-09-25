@@ -8,8 +8,10 @@ From any project directory (or pass `--scope user` to make it available
 everywhere rather than just the current project):
 
 ```
-claude mcp add --transport http dams https://memory.mahmoudbebars.dev/mcp --scope user
+claude mcp add --transport http dams https://memory.example.com/mcp --scope user
 ```
+
+(substitute your own deployed domain for `memory.example.com`)
 
 `--scope user` matters here — this server isn't specific to one project,
 you want it available in every Claude Code session, not just the repo

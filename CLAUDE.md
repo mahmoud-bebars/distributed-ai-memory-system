@@ -126,41 +126,44 @@ as static assets). Run `npm install` once from the repo root. Root-level
   *is* the auth). An unknown, expired, or permission-gated-off token always
   404s with the same generic body; never branch differently between those
   cases, so a guess can't learn anything from the response.
-- `shareUrl()` in `server/src/modules/shares/service.ts` hardcodes the share
-  host as `mcp.mahmoudbebars.dev` — that's the one custom domain (see
-  `server/wrangler.toml`'s `routes`) deliberately left outside Cloudflare Access,
-  because a share recipient has no Access login to give. **The Access
-  application for that hostname is configured in the Cloudflare
-  dashboard, not in this repo** — it bypasses auth only for
-  `/mcp`, `/.well-known/*`, `/authorize`, `/token`, `/register`,
-  `/callback`, and now needs `/share/*` and `/api/share/*` added to that
-  same bypass list by hand. No amount of Worker code changes this; the
-  Access check happens at Cloudflare's edge before a request ever reaches
-  this Worker.
-- **In-code host guard, `server/src/index.ts` (added 2026-09-08).** When this was
-  built, `mcp.mahmoudbebars.dev` turned out to have no working Access
-  restriction at all — the full REST API, reads and writes, was reachable
-  there unauthenticated. A `Hono` middleware (first thing registered on
-  `app`) now enforces the same allow-list in code: on that exact `Host`
-  header, only `/mcp`, `/authorize`, `/token`, `/register`, `/callback`,
-  `/.well-known/*`, `/share/*`, `/api/share/*`, and `/assets/*` pass
-  through; everything else 404s. This is a stopgap, not a fix for the
-  underlying Access misconfiguration — verify Access itself before ever
-  removing this guard, don't just assume it's been fixed because this
-  code exists. Static assets (`/`, favicons, `index.html` itself) can
-  still be fetched on that hostname even from a browser that never sends
-  a spoofable header, because Cloudflare serves matched static files
-  straight from its edge cache **before** invoking the Worker at all —
-  this guard never sees those requests. That's an accepted gap: those
-  files carry no data (the compiled SPA shell is public by nature
+- `shareUrl()` in `server/src/modules/shares/service.ts` resolves share links
+  against `env.SHARE_HOSTNAME` if it's set, else falls back to whatever host
+  served the request. `SHARE_HOSTNAME` (see `server/src/lib/bindings.ts`,
+  set as a `[vars]` entry in `wrangler.toml`) is for the case where you've
+  deliberately left one custom domain outside whatever access control
+  protects your main domain, because a share recipient has no login to that
+  access control to give. **That access control's own configuration lives
+  wherever you set it up (e.g. the Cloudflare dashboard for Access), not in
+  this repo** — it needs to bypass auth for `/mcp`, `/.well-known/*`,
+  `/authorize`, `/token`, `/register`, `/callback`, `/share/*`, and
+  `/api/share/*` on that hostname. No amount of Worker code changes this;
+  that check happens at the edge before a request ever reaches this Worker.
+- **In-code host guard, `server/src/index.ts` (added 2026-09-08, generalized
+  to `env.SHARE_HOSTNAME` when the repo went client/server + open source).**
+  This exists because, on the original deployment, the dashboard-side access
+  control on the share-link hostname turned out to have no working
+  restriction at all at one point — the full REST API, reads and writes, was
+  reachable there completely unauthenticated. A `Hono` middleware (first
+  thing registered on `app`) enforces the same allow-list in code: if
+  `SHARE_HOSTNAME` is set and the request's `Host` header matches it, only
+  `/mcp`, `/authorize`, `/token`, `/register`, `/callback`, `/.well-known/*`,
+  `/share/*`, `/api/share/*`, and `/assets/*` pass through; everything else
+  404s. It's a no-op if `SHARE_HOSTNAME` is unset. This is a stopgap, not a
+  fix for the underlying access-control misconfiguration — verify that
+  configuration itself before ever removing this guard, don't just assume
+  it's fine because this code exists. Static assets (`/`, favicons,
+  `index.html` itself) can still be fetched on that hostname even from a
+  browser that never sends a spoofable header, because Cloudflare serves
+  matched static files straight from its edge cache **before** invoking the
+  Worker at all — this guard never sees those requests. That's an accepted
+  gap: those files carry no data (the compiled SPA shell is public by nature
   either way), so it's cosmetic, not a leak. Closing it would mean
-  `run_worker_first` in `[assets]`, which would route every static asset
-  on `memory.mahmoudbebars.dev` through the Worker too — deliberately not
-  done here, don't add it without discussing the perf trade-off first.
-  Test this guard against the real deployed hostnames, not `wrangler
-  dev`: Miniflare doesn't forward a client-supplied `Host` header into
-  the Worker's request, so local `curl -H "Host: ..."` spoofing can't
-  actually exercise this logic.
+  `run_worker_first` in `[assets]`, which would route every static asset on
+  your main domain through the Worker too — deliberately not done here,
+  don't add it without discussing the perf trade-off first. Test this guard
+  against the real deployed hostnames, not `wrangler dev`: Miniflare doesn't
+  forward a client-supplied `Host` header into the Worker's request, so
+  local `curl -H "Host: ..."` spoofing can't actually exercise this logic.
 - `server/wrangler.toml`'s `[assets]` sets
   `not_found_handling = "single-page-application"` specifically so a cold
   page load of `/share/:token` (a client-side-only route, no matching

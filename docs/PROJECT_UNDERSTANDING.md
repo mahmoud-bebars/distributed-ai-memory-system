@@ -13,7 +13,7 @@ clean storage, not something to design for yet.
 
 **One Worker, not separate services.** Hono on Cloudflare Workers serving
 REST API, (future) MCP protocol, and the built frontend as static assets,
-all from one deployment on memory.mahmoudbebars.dev. Matches how Hoqooqi
+all from one deployment on a single custom domain. Matches how Hoqooqi
 is run. Avoids managing multiple deployment targets for a single-user tool.
 
 **R2 is the source of truth, not the local machine.** Original plan had
@@ -93,9 +93,10 @@ transport per request. Only `/mcp` is gated, by
 restricted to a single `ALLOWED_GITHUB_USER` checked during the OAuth
 callback. `/api/*` and the web UI are untouched.
 
-**Cloudflare Access is now on** for `memory.mahmoudbebars.dev` (the
+**Cloudflare Access is now on** for the main deployment domain (the
 zero-trust/zone-level dashboard step this doc used to list as outstanding
-has since been done). `mcp.mahmoudbebars.dev` is the one hostname deliberately left
+has since been done). The `SHARE_HOSTNAME` domain (see CLAUDE.md and
+`server/src/lib/bindings.ts`) is the one hostname deliberately left
 outside it, gated instead by a path-scoped Access bypass policy
 (`/mcp`, `/.well-known/*`, `/authorize`, `/token`, `/register`,
 `/callback` — configured in the dashboard, not in this repo).
@@ -103,7 +104,7 @@ outside it, gated instead by a path-scoped Access bypass policy
 **Shareable read-only project links are now built** (`server/src/modules/shares`,
 `client/src/components/ShareView.tsx`/`ShareDialog.tsx`). A project owner
 generates an unguessable token from the authenticated app; anyone with
-`https://mcp.mahmoudbebars.dev/share/:token` sees that one project's
+`https://<SHARE_HOSTNAME>/share/:token` sees that one project's
 Graph and Entries tabs, read-only, with no login and no visibility into
 any other project. This is why the token endpoint
 (`GET /api/share/:token/memory`) and the `/share/*` frontend route needed

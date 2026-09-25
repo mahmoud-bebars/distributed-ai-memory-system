@@ -31,13 +31,14 @@ from `server/`.
    that build as static assets:
    npm run deploy
 
-5. Point the custom domain at it: uncomment the `routes` block in
-   server/wrangler.toml (memory.mahmoudbebars.dev), then `npm run deploy`
-   again from the repo root. Cloudflare will prompt you to confirm the DNS
-   record if it isn't already proxied through your zone.
+5. Point your custom domain at it: uncomment the `routes` block in
+   server/wrangler.toml and set `pattern` to your own domain (e.g.
+   `memory.example.com`), then `npm run deploy` again from the repo root.
+   Cloudflare will prompt you to confirm the DNS record if it isn't already
+   proxied through your zone.
 
-6. Smoke test:
-   curl https://memory.mahmoudbebars.dev/api
-   curl -X POST https://memory.mahmoudbebars.dev/api/projects \
+6. Smoke test (substitute your own domain):
+   curl https://memory.example.com/api
+   curl -X POST https://memory.example.com/api/projects \
      -H 'content-type: application/json' \
      -d '{"slug":"ghoraf","title":"Ghoraf"}'

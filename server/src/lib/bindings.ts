@@ -6,6 +6,15 @@ export interface Bindings {
   ASSETS: Fetcher;
   ANTHROPIC_API_KEY: string;
 
+  // Optional. The one hostname (if any) you've deliberately left outside
+  // whatever access control sits in front of your main domain, so that
+  // unauthenticated recipients of a share link — and the /mcp OAuth flow —
+  // can still be reached. See CLAUDE.md's "Shareable read-only links"
+  // section. Leave unset if you don't have a separate access-gated domain;
+  // share links then just resolve on whatever host served the request, and
+  // the host-guard middleware in index.ts is skipped entirely.
+  SHARE_HOSTNAME?: string;
+
   // OAuth for the /mcp route only (see src/modules/auth). The REST API and
   // web UI don't touch any of these — they're consumed exclusively by
   // @cloudflare/workers-oauth-provider and the GitHub auth handler.

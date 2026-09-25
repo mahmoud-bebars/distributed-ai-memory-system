@@ -3,10 +3,12 @@ main = "src/index.ts"
 compatibility_date = "2026-08-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Uncomment once DNS is pointed at this Worker
+# Uncomment once DNS is pointed at this Worker. The second route is only
+# needed if you're using SHARE_HOSTNAME below to carve out a separate,
+# access-control-bypassed domain for share links — otherwise one is enough.
 routes = [
-  { pattern = "memory.mahmoudbebars.dev", custom_domain = true },
-  { pattern = "mcp.mahmoudbebars.dev", custom_domain = true }
+  { pattern = "memory.example.com", custom_domain = true },
+  # { pattern = "share.example.com", custom_domain = true },
 ]
 
 [[d1_databases]]
@@ -37,6 +39,13 @@ ENVIRONMENT = "development"
 # set it to your own login before deploying. Leaving it empty means nobody can
 # authenticate. Alternatively override with: wrangler secret put ALLOWED_GITHUB_USER
 ALLOWED_GITHUB_USER = ""
+# Optional. Set this only if you want a second hostname (e.g. share.example.com,
+# uncommented in `routes` above) left outside whatever access control you put
+# in front of memory.example.com, so share-link recipients and the /mcp OAuth
+# flow can still be reached. See CLAUDE.md's "Shareable read-only links"
+# section. Leave unset (or delete this line) if you don't need that — share
+# links then just resolve on whatever host served the request.
+# SHARE_HOSTNAME = "share.example.com"
 
 # Secrets — set each with `wrangler secret put <NAME>` (and mirror them in a
 # local, git-ignored .dev.vars for `wrangler dev`):

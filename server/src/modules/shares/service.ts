@@ -5,13 +5,13 @@ import type { Bindings } from "../../lib/bindings";
 import { ProjectsService } from "../projects";
 import type { CreateShareLinkInput, ExpirationOption, UpdateShareLinkInput } from "./schema";
 
-// mcp.mahmoudbebars.dev is the one hostname deliberately left outside
-// Cloudflare Access (see wrangler.toml's routes and CLAUDE.md's share-link
-// notes) — share links must resolve there, never on the Access-gated
-// memory.mahmoudbebars.dev host.
-const SHARE_HOST = "mcp.mahmoudbebars.dev";
-
-export const shareUrl = (token: string): string => `https://${SHARE_HOST}/share/${token}`;
+// If env.SHARE_HOSTNAME is set, it's the one hostname deliberately left
+// outside whatever access control protects your main domain (see
+// CLAUDE.md's share-link notes) — share links resolve there instead of on
+// the access-gated host. If it's unset, share links just resolve on
+// whatever host served the request that's building this URL.
+export const shareUrl = (token: string, env: Bindings, requestHost: string): string =>
+  `https://${env.SHARE_HOSTNAME || requestHost}/share/${token}`;
 
 const EXPIRATION_MS: Record<ExpirationOption, number | null> = {
   "1d": 24 * 60 * 60 * 1000,
