@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { streamSSE } from "hono/streaming";
 import { zValidator } from "@hono/zod-validator";
 import type { Bindings } from "../../lib/bindings";
 import { chatRequestSchema, ChatService } from "../chat";
@@ -126,18 +127,40 @@ publicShareRoutes.post("/:token/chat", zValidator("json", chatRequestSchema), as
   const resolved = await shares.resolveByToken(c.req.param("token"));
   if (!resolved || !resolved.share.allowChat) return c.json({ error: "Not found" }, 404);
 
-  const { question, docFilename } = c.req.valid("json");
+  const { question, docFilename, history } = c.req.valid("json");
   const chat = new ChatService(c.env);
+  const scopedDocFilename = resolved.share.allowDocs ? docFilename : undefined;
+
+  // Validate BEFORE any streaming starts — see chat/routes.ts's comment on
+  // the authenticated route for why (streamSSE below commits headers, so
+  // the HTTP status can't change once it starts).
   try {
-    const result = await chat.ask(resolved.project.slug, question, {
-      docFilename: resolved.share.allowDocs ? docFilename : undefined,
-      includeDocs: resolved.share.allowDocs,
-      allowMutatingTools: false,
-    });
-    return c.json(result);
+    await chat.assertExists(resolved.project.slug, scopedDocFilename);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    const status = message.startsWith("Unknown doc") ? 404 : 502;
-    return c.json({ error: message }, status);
+    return c.json({ error: message }, message.startsWith("Unknown doc") ? 404 : 502);
   }
+
+  // See chat/routes.ts's comment on the authenticated route for why there's
+  // no third (onError) argument to streamSSE here either — catching inside
+  // this callback avoids Hono's `run()` appending a second, bare-string
+  // error frame on top of ours.
+  return streamSSE(c, async (stream) => {
+    try {
+      const events = chat.ask(resolved.project.slug, question, {
+        docFilename: scopedDocFilename,
+        includeDocs: resolved.share.allowDocs,
+        allowMutatingTools: false,
+        history,
+        signal: c.req.raw.signal,
+      });
+      for await (const event of events) {
+        await stream.writeSSE({ data: JSON.stringify(event) });
+        if (event.type === "done" || event.type === "error") return;
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      await stream.writeSSE({ data: JSON.stringify({ type: "error", message }) });
+    }
+  });
 });

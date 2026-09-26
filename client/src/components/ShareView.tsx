@@ -116,10 +116,13 @@ export function ShareView({ token }: { token: string }) {
             {meta.allowChat && (
               <TabsContent value="chat" className="min-h-0 flex-1">
                 <ChatPanel
+                  storageKey={`chat:share:${token}`}
                   entries={entries}
                   docFilenames={docFilenames}
                   onJumpToEntity={handleJumpToEntity}
-                  ask={(question, docFilename) => api.askShareChat(token, question, docFilename)}
+                  streamAsk={(question, docFilename, history, handlers, signal) =>
+                    api.streamShareChat(token, question, { docFilename, history }, handlers, signal)
+                  }
                 />
               </TabsContent>
             )}

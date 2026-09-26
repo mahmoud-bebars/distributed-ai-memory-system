@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.128.0",
     "@cfworker/json-schema": "^4.1.1",
     "@cloudflare/workers-oauth-provider": "^0.10.3",
     "@hono/zod-validator": "^0.4.0",

@@ -318,11 +318,12 @@ export function ProjectView({
         <TabsContent value="chat" className="min-h-0 flex-1">
           <ChatPanel
             slug={project.slug}
+            storageKey={`chat:project:${project.slug}`}
             entries={entries}
             docFilenames={docFilenames}
             onJumpToEntity={handleJumpToEntity}
-            ask={(question, docFilename) =>
-              api.askChat(project.slug, question, docFilename)
+            streamAsk={(question, docFilename, history, handlers, signal) =>
+              api.streamChat(project.slug, question, { docFilename, history }, handlers, signal)
             }
           />
         </TabsContent>

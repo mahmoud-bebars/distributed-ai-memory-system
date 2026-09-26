@@ -174,7 +174,7 @@ export function buildMemoryMcpServer(env: Bindings): McpServer {
     },
     async ({ slug, question }) => {
       try {
-        const { answer } = await chat.ask(slug, question);
+        const { answer } = await chat.askOnce(slug, question);
         return jsonResult({ answer });
       } catch (err) {
         return errorResult(err instanceof Error ? err.message : "Unknown error");

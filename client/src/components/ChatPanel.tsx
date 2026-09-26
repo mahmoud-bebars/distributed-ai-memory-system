@@ -1,26 +1,33 @@
-import { useEffect, useState, type FormEvent, type KeyboardEvent } from "react";
-import { api, type ChatResponse, type ChatSource, type MemoryEntry, type ProposedAction } from "@/api";
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import {
+  api,
+  type ChatHistoryTurn,
+  type ChatSource,
+  type ChatStreamHandlers,
+  type MemoryEntry,
+  type ProposedAction,
+} from "@/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { loadMessages, saveMessages, type StoredMessage } from "@/lib/chatStorage";
 import { renderMarkdown } from "@/lib/markdown";
-import { CATEGORY_ICONS, categoryColor, categoryOf, resolveSourceEntity } from "@/lib/memory";
+import { categoryColor, categoryOf, resolveSourceEntity } from "@/lib/memory";
 import { cn } from "@/lib/utils";
 import { SendHorizontal, Sparkles, X } from "lucide-react";
 import { FileText, GitBranch, StickyNote } from "lucide-react";
 
-type ActionStatus = "pending" | "approved" | "rejected" | "error";
+type Message = StoredMessage;
+type ActionStatus = NonNullable<Message["actionStatus"]>;
 
-interface Message {
-  role: "user" | "assistant";
-  text: string;
-  sources?: ChatSource[];
-  proposedAction?: ProposedAction;
-  actionStatus?: ActionStatus;
-  actionError?: string;
-}
+// How much of the conversation to replay back to the server as context for
+// the new question — there's no server-side chat session, so this capped
+// window of prior turns (see ChatHistoryTurn) is what makes a follow-up
+// question feel continuous. Matches the server's own cap
+// (chatHistoryTurnSchema.max(10)) — no point sending more than it'll keep.
+const MAX_HISTORY_TURNS = 10;
 
 const SOURCE_ICON: Record<MemoryEntry["type"], typeof FileText> = {
   entity: FileText,
@@ -29,9 +36,9 @@ const SOURCE_ICON: Record<MemoryEntry["type"], typeof FileText> = {
 };
 
 // Renders a mutating doc edit the model proposed but did NOT execute (see
-// src/modules/chat/service.ts) as an explicit Approve/Reject card. Approve
-// is the only path that ever calls the real write/delete route — rejecting,
-// or just not clicking anything, leaves the project untouched.
+// server/src/modules/chat/service.ts) as an explicit Approve/Reject card.
+// Approve is the only path that ever calls the real write/delete route —
+// rejecting, or just not clicking anything, leaves the project untouched.
 function ProposedActionCard({
   action,
   status,
@@ -88,30 +95,17 @@ function ProposedActionCard({
   );
 }
 
-// ChatService.ask dumps every memory entry into its context on every
-// question — always, no picker. Docs work the same way UNLESS `scopedDoc`
-// is set, in which case only that one file is read (see ChatPanel's
-// doc-picker popover and ChatService.buildDocsContext on the backend).
-function contextParts(entryCount: number, docCount: number, scopedDoc: string | null): string[] {
+// The model now decides for itself, per question, whether to look anything
+// up (via search_memory/list_docs/search_docs/read_doc) rather than every
+// question front-loading the whole project — this just tells the user
+// what's available for it to draw on, not what's already been sent.
+function contextSummary(entryCount: number, docCount: number, scopedDoc: string | null): string {
+  if (scopedDoc) return `This chat is scoped to just "${scopedDoc}" — memory stays searchable as usual.`;
+  if (entryCount === 0 && docCount === 0) return "This project has no memory or docs recorded yet.";
   const parts: string[] = [];
   if (entryCount > 0) parts.push(`${entryCount} memory ${entryCount === 1 ? "entry" : "entries"}`);
-  if (scopedDoc) parts.push(`just "${scopedDoc}"`);
-  else if (docCount > 0) parts.push(`${docCount} ${docCount === 1 ? "doc" : "docs"}`);
-  return parts;
-}
-
-function contextSummary(entryCount: number, docCount: number, scopedDoc: string | null): string {
-  const parts = contextParts(entryCount, docCount, scopedDoc);
-  if (parts.length === 0) return "This project has no memory or docs recorded yet.";
-  const tail = scopedDoc
-    ? "memory is always included; pick the doc icon to change or clear the scope."
-    : "nothing to select, it's all included automatically.";
-  return `This chat sees ${parts.join(" and ")} from this project on every question — ${tail}`;
-}
-
-function loadingLabel(entryCount: number, docCount: number, scopedDoc: string | null): string {
-  const parts = contextParts(entryCount, docCount, scopedDoc);
-  return parts.length === 0 ? "Thinking…" : `Reading ${parts.join(" and ")}…`;
+  if (docCount > 0) parts.push(`${docCount} ${docCount === 1 ? "doc" : "docs"}`);
+  return `This chat can look up whatever's relevant from this project's ${parts.join(" and ")} — it only pulls in what your question actually needs.`;
 }
 
 function KeyReferences({
@@ -126,10 +120,26 @@ function KeyReferences({
   return (
     <div className="mt-2 max-w-[85%] rounded-xl border border-border bg-card p-2.5">
       <p className="mb-1.5 px-0.5 text-xs font-medium text-muted-foreground">
-        Key references · {sources.length} memory {sources.length === 1 ? "entry" : "entries"}
+        Key references · {sources.length} {sources.length === 1 ? "source" : "sources"}
       </p>
       <div className="flex flex-col gap-0.5">
-        {sources.map((source) => {
+        {sources.map((source, i) => {
+          if (source.kind === "doc") {
+            return (
+              <div
+                key={`doc-${source.filename}-${i}`}
+                title={source.snippet}
+                className="flex items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs opacity-80"
+              >
+                <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate font-mono">{source.filename}</span>
+                <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                  doc
+                </span>
+              </div>
+            );
+          }
+
           const Icon = SOURCE_ICON[source.type];
           const entity = entries.find((e) => e.id === source.id);
           const color = entity?.type === "entity" ? categoryColor(categoryOf(entity)) : "var(--muted-foreground)";
@@ -163,31 +173,56 @@ function KeyReferences({
 
 export function ChatPanel({
   slug,
+  storageKey,
   entries,
   docFilenames,
   onJumpToEntity,
-  ask,
+  streamAsk,
 }: {
   // Only needed for approving a proposed doc edit (updateDoc/deleteDoc) —
   // undefined in a read-only context (a share link), where the model is
   // never offered those tools in the first place, so proposedAction can
   // never actually occur and this is never read.
   slug?: string;
+  // Persists this conversation to localStorage under this key (see
+  // lib/chatStorage.ts) — distinct per project/share link so switching
+  // between them never mixes histories, and a refresh doesn't lose one.
+  storageKey: string;
   entries: MemoryEntry[];
   docFilenames: string[];
   onJumpToEntity: (name: string) => void;
-  // How to actually ask the question — the authenticated project route or
-  // the public share-token route, depending on where this panel is mounted.
-  ask: (question: string, docFilename?: string) => Promise<ChatResponse>;
+  // Streams the answer as it's generated instead of waiting for the whole
+  // thing — the authenticated project route or the public share-token
+  // route, depending on where this panel is mounted. Resolves once the
+  // turn is fully done (including on error); never rejects.
+  streamAsk: (
+    question: string,
+    docFilename: string | undefined,
+    history: ChatHistoryTurn[],
+    handlers: ChatStreamHandlers,
+    signal: AbortSignal,
+  ) => Promise<void>;
 }) {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>(() => loadMessages(storageKey));
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
+  const [agentStatus, setAgentStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [scopedDoc, setScopedDoc] = useState<string | null>(null);
   const [docPickerOpen, setDocPickerOpen] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
   const entryCount = entries.length;
   const docCount = docFilenames.length;
+
+  // Reload from this key's own stored history whenever it changes (e.g.
+  // switching projects) — ChatPanel isn't remounted on that switch, so this
+  // effect is what keeps one project's messages from leaking into another.
+  useEffect(() => {
+    setMessages(loadMessages(storageKey));
+  }, [storageKey]);
+
+  // Abort any in-flight stream if the panel goes away mid-answer.
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   // Switching projects (or the scoped doc getting deleted/renamed) can
   // leave this pointing at a file that's no longer there — drop it rather
@@ -200,28 +235,78 @@ export function ChatPanel({
     const trimmed = question.trim();
     if (!trimmed || loading) return;
 
-    setMessages((prev) => [...prev, { role: "user", text: trimmed }]);
+    const key = storageKey;
+    const priorMessages = messages;
+    const historyForRequest: ChatHistoryTurn[] = priorMessages
+      .filter((m) => m.text.length > 0)
+      .slice(-MAX_HISTORY_TURNS)
+      .map((m) => ({ role: m.role, text: m.text }));
+
+    const userMessage: Message = { role: "user", text: trimmed };
+    const assistantIndex = priorMessages.length + 1;
+
+    setMessages((prev) => [...prev, userMessage, { role: "assistant", text: "" }]);
+    saveMessages(key, [...priorMessages, userMessage, { role: "assistant", text: "" }]);
     setQuestion("");
     setLoading(true);
     setError(null);
+    setAgentStatus(null);
 
-    try {
-      const { answer, sources, proposedAction } = await ask(trimmed, scopedDoc ?? undefined);
-      setMessages((prev) => [
-        ...prev,
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    let assistantText = "";
+    let assistantSources: ChatSource[] | undefined;
+    let assistantAction: ProposedAction | undefined;
+
+    function patchAssistant(patch: Partial<Message>) {
+      setMessages((prev) => prev.map((m, i) => (i === assistantIndex ? { ...m, ...patch } : m)));
+    }
+
+    function finalize() {
+      setLoading(false);
+      setAgentStatus(null);
+      saveMessages(key, [
+        ...priorMessages,
+        userMessage,
         {
           role: "assistant",
-          text: answer,
-          sources,
-          proposedAction,
-          actionStatus: proposedAction ? "pending" : undefined,
+          text: assistantText,
+          sources: assistantSources,
+          proposedAction: assistantAction,
+          actionStatus: assistantAction ? "pending" : undefined,
         },
       ]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
-    } finally {
-      setLoading(false);
     }
+
+    await streamAsk(
+      trimmed,
+      scopedDoc ?? undefined,
+      historyForRequest,
+      {
+        onStatus: (label) => setAgentStatus(label),
+        onTextDelta: (delta) => {
+          assistantText += delta;
+          setAgentStatus(null);
+          patchAssistant({ text: assistantText });
+        },
+        onSources: (sources) => {
+          assistantSources = sources;
+          patchAssistant({ sources });
+        },
+        onProposedAction: (action) => {
+          assistantAction = action;
+          patchAssistant({ proposedAction: action, actionStatus: "pending" });
+        },
+        onError: (message) => {
+          setError(message);
+          finalize();
+        },
+        onDone: finalize,
+      },
+      controller.signal,
+    );
   }
 
   function handleSubmit(e: FormEvent) {
@@ -248,29 +333,38 @@ export function ChatPanel({
       } else {
         await api.deleteDoc(slug, action.input.filename);
       }
-      setMessages((prev) =>
-        prev.map((m, i) => (i === index ? { ...m, actionStatus: "approved" } : m)),
-      );
+      setMessages((prev) => {
+        const next = prev.map((m, i) => (i === index ? { ...m, actionStatus: "approved" as const } : m));
+        saveMessages(storageKey, next);
+        return next;
+      });
     } catch (err) {
-      setMessages((prev) =>
-        prev.map((m, i) =>
+      setMessages((prev) => {
+        const next = prev.map((m, i) =>
           i === index
             ? {
                 ...m,
-                actionStatus: "error",
+                actionStatus: "error" as const,
                 actionError: err instanceof Error ? err.message : "Something went wrong",
               }
             : m,
-        ),
-      );
+        );
+        saveMessages(storageKey, next);
+        return next;
+      });
     }
   }
 
   function handleReject(index: number) {
-    setMessages((prev) =>
-      prev.map((m, i) => (i === index ? { ...m, actionStatus: "rejected" } : m)),
-    );
+    setMessages((prev) => {
+      const next = prev.map((m, i) => (i === index ? { ...m, actionStatus: "rejected" as const } : m));
+      saveMessages(storageKey, next);
+      return next;
+    });
   }
+
+  const lastMessage = messages[messages.length - 1];
+  const showThinking = loading && (!lastMessage || lastMessage.role !== "assistant" || lastMessage.text.length === 0);
 
   return (
     <div className="flex h-full flex-col gap-3">
@@ -320,10 +414,10 @@ export function ChatPanel({
               </div>
             )
           )}
-          {loading && (
+          {showThinking && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Sparkles className="size-3.5 animate-pulse" />
-              {loadingLabel(entryCount, docCount, scopedDoc)}
+              {agentStatus ?? "Thinking…"}
             </div>
           )}
           {error && <p className="text-sm text-destructive">{error}</p>}

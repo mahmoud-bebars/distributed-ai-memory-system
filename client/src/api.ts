@@ -16,26 +16,50 @@ export interface MemoryEntry {
   created_at?: string;
 }
 
-// A memory entry the model reports it drew on to answer — not a retrieval
-// result, a citation (see src/modules/chat/service.ts's extractSources).
-export interface ChatSource {
-  id: string;
-  type: MemoryEntry["type"];
-  summary: string;
-}
+// A memory entry or doc the model actually pulled in via an executed
+// search_memory/search_docs/read_doc tool call this turn — not a
+// self-reported citation, grounded in what the backend really fetched (see
+// server/src/modules/chat/service.ts). Mirrors the server's ChatSource type;
+// duplicated here rather than imported since the client doesn't build
+// against the server's source tree (same convention as currentEntities).
+export type ChatSource =
+  | { kind: "memory"; id: string; type: MemoryEntry["type"]; summary: string }
+  | { kind: "doc"; filename: string; snippet: string };
 
 // A mutating doc edit the model proposed mid-conversation but did NOT
-// execute — see src/modules/chat/service.ts's extractProposedAction.
-// ChatPanel renders this as an Approve/Reject card; only Approve calls the
-// real doc routes below.
+// execute — see server/src/modules/chat/service.ts. ChatPanel renders this
+// as an Approve/Reject card; only Approve calls the real doc routes below.
 export type ProposedAction =
   | { tool: "update_doc"; input: { filename: string; content: string } }
   | { tool: "delete_doc"; input: { filename: string } };
 
-export interface ChatResponse {
-  answer: string;
-  sources: ChatSource[];
-  proposedAction?: ProposedAction;
+// A prior turn ChatPanel already holds (and has persisted to localStorage —
+// see lib/chatStorage.ts) — replayed back to the server on each new
+// question so a conversation can carry on across separate questions despite
+// there being no server-side chat session/store. Capped client-side to a
+// handful of exchanges; the server caps it again (chatHistoryTurnSchema).
+export interface ChatHistoryTurn {
+  role: "user" | "assistant";
+  text: string;
+}
+
+// The SSE event vocabulary POST /chat now streams instead of returning one
+// JSON blob — mirrors server/src/modules/chat/schema.ts's ChatStreamEvent.
+export type ChatStreamEvent =
+  | { type: "status"; label: string }
+  | { type: "text"; delta: string }
+  | { type: "sources"; sources: ChatSource[] }
+  | { type: "proposedAction"; action: ProposedAction }
+  | { type: "done" }
+  | { type: "error"; message: string };
+
+export interface ChatStreamHandlers {
+  onStatus: (label: string) => void;
+  onTextDelta: (delta: string) => void;
+  onSources: (sources: ChatSource[]) => void;
+  onProposedAction: (action: ProposedAction) => void;
+  onError: (message: string) => void;
+  onDone: () => void;
 }
 
 export type ExpirationOption = "1d" | "7d" | "30d" | "90d" | "never";
@@ -67,6 +91,118 @@ export interface ShareMeta {
   label: string | null;
   allowChat: boolean;
   allowDocs: boolean;
+}
+
+/** Reads an SSE response body (from hono/streaming's streamSSE) and invokes
+ *  `handlers` per event as it arrives. Hand-rolled rather than `EventSource`
+ *  because this is a POST with a JSON body — EventSource only does GET.
+ *  Only the `data:` line of each frame is parsed; the `event:` line (if
+ *  Hono ever writes one) is ignored, since our own event shape already
+ *  carries a `type` discriminant in the JSON payload. */
+async function consumeChatStream(response: Response, handlers: ChatStreamHandlers): Promise<void> {
+  if (!response.ok || !response.body) {
+    let detail = String(response.status);
+    try {
+      const body = (await response.json()) as { error?: unknown };
+      if (typeof body.error === "string") detail = body.error;
+    } catch {
+      // Non-JSON body — keep the status code.
+    }
+    handlers.onError(detail);
+    return;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finished = false;
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let frameEnd = buffer.indexOf("\n\n");
+      while (frameEnd !== -1) {
+        const frame = buffer.slice(0, frameEnd);
+        buffer = buffer.slice(frameEnd + 2);
+
+        const dataLine = frame.split("\n").find((line) => line.startsWith("data:"));
+        if (dataLine) {
+          try {
+            const event = JSON.parse(dataLine.slice(5).trim()) as ChatStreamEvent;
+            switch (event.type) {
+              case "status":
+                handlers.onStatus(event.label);
+                break;
+              case "text":
+                handlers.onTextDelta(event.delta);
+                break;
+              case "sources":
+                handlers.onSources(event.sources);
+                break;
+              case "proposedAction":
+                handlers.onProposedAction(event.action);
+                break;
+              case "error":
+                finished = true;
+                handlers.onError(event.message);
+                break;
+              case "done":
+                finished = true;
+                handlers.onDone();
+                break;
+            }
+          } catch {
+            // Malformed frame — skip it rather than abort the whole stream.
+          }
+        }
+
+        frameEnd = buffer.indexOf("\n\n");
+      }
+    }
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") return;
+    handlers.onError(err instanceof Error ? err.message : "Connection lost");
+    return;
+  }
+
+  // The connection closed without a done/error frame (e.g. the Worker was
+  // killed mid-response) — still clear the caller's loading state instead
+  // of leaving it spinning forever.
+  if (!finished) handlers.onDone();
+}
+
+interface ChatStreamOpts {
+  docFilename?: string;
+  history?: ChatHistoryTurn[];
+}
+
+/** Shared by streamChat/streamShareChat — a rejected fetch (network error,
+ *  or the caller's own AbortController firing before a response even comes
+ *  back) needs the same onError/no-op-on-abort handling consumeChatStream
+ *  already gives a response that resolved but failed mid-stream. */
+async function postChatStream(
+  path: string,
+  body: Record<string, unknown>,
+  handlers: ChatStreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(`/api${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal,
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") return;
+    handlers.onError(err instanceof Error ? err.message : "Failed to reach the server");
+    return;
+  }
+  await consumeChatStream(response, handlers);
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -104,14 +240,20 @@ export const api = {
       body: JSON.stringify(input),
     }),
   getMemory: (slug: string) => request<MemoryEntry[]>(`/projects/${slug}/memory`),
-  /** `docFilename` scopes the chat's doc context to just that one file
-   *  instead of every doc in the project — memory is always included in
-   *  full either way. */
-  askChat: (slug: string, question: string, docFilename?: string) =>
-    request<ChatResponse>(`/projects/${slug}/chat`, {
-      method: "POST",
-      body: JSON.stringify({ question, ...(docFilename ? { docFilename } : {}) }),
-    }),
+  /** Streams a chat turn as SSE events instead of one JSON response — see
+   *  ChatStreamHandlers. `docFilename` scopes the chat's doc context to
+   *  just that one file (memory always stays search-driven); `history` is
+   *  the capped window of prior turns ChatPanel replays for continuity,
+   *  since there's no server-side chat session. Resolves once the stream
+   *  ends (after onDone or onError has fired), never rejects — network and
+   *  HTTP failures also come through `onError`. */
+  streamChat: (
+    slug: string,
+    question: string,
+    opts: ChatStreamOpts,
+    handlers: ChatStreamHandlers,
+    signal?: AbortSignal,
+  ) => postChatStream(`/projects/${slug}/chat`, { question, ...opts }, handlers, signal),
   /** Fetches the raw memory.jsonl bytes for download — not re-serialized JSON. */
   downloadMemoryRaw: async (slug: string): Promise<Blob> => {
     const response = await fetch(`/api/projects/${slug}/memory/raw`);
@@ -179,9 +321,11 @@ export const api = {
   },
   /** Only reachable when the link's allowChat is on — 404s otherwise, same
    *  as an invalid token would. Uses the project owner's Anthropic key. */
-  askShareChat: (token: string, question: string, docFilename?: string) =>
-    request<ChatResponse>(`/share/${token}/chat`, {
-      method: "POST",
-      body: JSON.stringify({ question, ...(docFilename ? { docFilename } : {}) }),
-    }),
+  streamShareChat: (
+    token: string,
+    question: string,
+    opts: ChatStreamOpts,
+    handlers: ChatStreamHandlers,
+    signal?: AbortSignal,
+  ) => postChatStream(`/share/${token}/chat`, { question, ...opts }, handlers, signal),
 };
