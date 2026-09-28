@@ -1,7 +1,8 @@
 import { z } from "zod";
+import { expirationOptionSchema } from "../../lib/expiration";
 
-export const expirationOptionSchema = z.enum(["1d", "7d", "30d", "90d", "never"]);
-export type ExpirationOption = z.infer<typeof expirationOptionSchema>;
+export { expirationOptionSchema };
+export type { ExpirationOption } from "../../lib/expiration";
 
 const shareLinkFields = {
   label: z.string().max(200).optional(),

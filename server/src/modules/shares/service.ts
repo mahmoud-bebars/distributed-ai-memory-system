@@ -1,9 +1,10 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
 import { projectShares, type ProjectRow, type ProjectShareRow } from "../../db/schema";
+import { computeExpiresAt } from "../../lib/expiration";
 import type { Bindings } from "../../lib/bindings";
 import { ProjectsService } from "../projects";
-import type { CreateShareLinkInput, ExpirationOption, UpdateShareLinkInput } from "./schema";
+import type { CreateShareLinkInput, UpdateShareLinkInput } from "./schema";
 
 // If env.SHARE_HOSTNAME is set, it's the one hostname deliberately left
 // outside whatever access control protects your main domain (see
@@ -12,22 +13,6 @@ import type { CreateShareLinkInput, ExpirationOption, UpdateShareLinkInput } fro
 // whatever host served the request that's building this URL.
 export const shareUrl = (token: string, env: Bindings, requestHost: string): string =>
   `https://${env.SHARE_HOSTNAME || requestHost}/share/${token}`;
-
-const EXPIRATION_MS: Record<ExpirationOption, number | null> = {
-  "1d": 24 * 60 * 60 * 1000,
-  "7d": 7 * 24 * 60 * 60 * 1000,
-  "30d": 30 * 24 * 60 * 60 * 1000,
-  "90d": 90 * 24 * 60 * 60 * 1000,
-  never: null,
-};
-
-// Always computed fresh from "now" at create/update time — editing a link's
-// expiration to "7 days" means "7 days from whenever you saved that", not
-// an extension of whatever expiry it had before.
-function computeExpiresAt(option: ExpirationOption): string | null {
-  const ms = EXPIRATION_MS[option];
-  return ms === null ? null : new Date(Date.now() + ms).toISOString();
-}
 
 function isExpired(share: ProjectShareRow): boolean {
   return share.expiresAt !== null && new Date(share.expiresAt).getTime() <= Date.now();

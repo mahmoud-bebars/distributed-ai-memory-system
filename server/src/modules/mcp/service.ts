@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { CfWorkerJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/cfworker";
 import type { Bindings } from "../../lib/bindings";
+import type { TokenScope } from "../tokens";
 import { ChatService } from "../chat";
 import { DocsService } from "../docs";
 import { ProjectsService } from "../projects";
@@ -50,11 +51,21 @@ const errorResult = (message: string) => ({
  * `CfWorkerJsonSchemaValidator` is passed explicitly so the SDK never falls
  * back to its Ajv default, which compiles schemas via `new Function` — banned
  * on the Workers runtime.
+ *
+ * `scope` comes from the bearer token/session that authenticated this
+ * request (see modules/tokens/middleware.ts) and gates which tools get
+ * registered at all: a `read_only` token never even sees the mutating
+ * tools (append_memory, update_entity, append_doc, update_doc, delete_doc)
+ * in its tool list, let alone gets to call them. This is the one place
+ * scope enforcement happens below the top-level auth check, since every
+ * /mcp request is a POST and can't be split by HTTP method the way REST
+ * routes are.
  */
-export function buildMemoryMcpServer(env: Bindings): McpServer {
+export function buildMemoryMcpServer(env: Bindings, scope: TokenScope): McpServer {
   const projects = new ProjectsService(env);
   const chat = new ChatService(env);
   const docs = new DocsService(env);
+  const canWrite = scope === "read_write" || scope === "admin";
 
   const server = new McpServer(SERVER_INFO, {
     jsonSchemaValidator: new CfWorkerJsonSchemaValidator(),
@@ -80,90 +91,92 @@ export function buildMemoryMcpServer(env: Bindings): McpServer {
     async ({ slug }) => jsonResult(await projects.readMemory(slug)),
   );
 
-  server.registerTool(
-    "append_memory",
-    {
-      description:
-        "Append one entry to a project's append-only memory log. The entry must have an id (ulid), a type of entity/relation/observation, and a content object.",
-      inputSchema: appendMemoryInput,
-    },
-    async ({ slug, entry }) => {
-      try {
-        await projects.appendMemory(slug, entry);
-        return jsonResult({ ok: true });
-      } catch (err) {
-        return errorResult(err instanceof Error ? err.message : "Unknown error");
-      }
-    },
-  );
+  if (canWrite) {
+    server.registerTool(
+      "append_memory",
+      {
+        description:
+          "Append one entry to a project's append-only memory log. The entry must have an id (ulid), a type of entity/relation/observation, and a content object.",
+        inputSchema: appendMemoryInput,
+      },
+      async ({ slug, entry }) => {
+        try {
+          await projects.appendMemory(slug, entry);
+          return jsonResult({ ok: true });
+        } catch (err) {
+          return errorResult(err instanceof Error ? err.message : "Unknown error");
+        }
+      },
+    );
 
-  server.registerTool(
-    "update_entity",
-    {
-      description:
-        "Update an existing entity by appending a new revision that merges the given fields (e.g. category) onto its current content — last-write-wins, the append-only log keeps every prior revision. Fails if no entity with that name exists yet; use append_memory to create one.",
-      inputSchema: updateEntityInput,
-    },
-    async ({ slug, name, category, fields }) => {
-      try {
-        const updates = { ...(fields ?? {}), ...(category !== undefined ? { category } : {}) };
-        const entry = await projects.updateEntity(slug, name, updates);
-        return jsonResult(entry);
-      } catch (err) {
-        return errorResult(err instanceof Error ? err.message : "Unknown error");
-      }
-    },
-  );
+    server.registerTool(
+      "update_entity",
+      {
+        description:
+          "Update an existing entity by appending a new revision that merges the given fields (e.g. category) onto its current content — last-write-wins, the append-only log keeps every prior revision. Fails if no entity with that name exists yet; use append_memory to create one.",
+        inputSchema: updateEntityInput,
+      },
+      async ({ slug, name, category, fields }) => {
+        try {
+          const updates = { ...(fields ?? {}), ...(category !== undefined ? { category } : {}) };
+          const entry = await projects.updateEntity(slug, name, updates);
+          return jsonResult(entry);
+        } catch (err) {
+          return errorResult(err instanceof Error ? err.message : "Unknown error");
+        }
+      },
+    );
 
-  server.registerTool(
-    "append_doc",
-    {
-      description:
-        "Append content to a project's markdown doc file, stored separately from the memory log under {slug}/docs/{filename}.md. Creates the file if it doesn't exist yet; otherwise appends with a '---' separator and a timestamp heading, matching the project's append-only convention.",
-      inputSchema: appendDocInput,
-    },
-    async ({ slug, filename, content }) => {
-      try {
-        await docs.append(slug, filename, content);
-        return jsonResult({ ok: true });
-      } catch (err) {
-        return errorResult(err instanceof Error ? err.message : "Unknown error");
-      }
-    },
-  );
+    server.registerTool(
+      "append_doc",
+      {
+        description:
+          "Append content to a project's markdown doc file, stored separately from the memory log under {slug}/docs/{filename}.md. Creates the file if it doesn't exist yet; otherwise appends with a '---' separator and a timestamp heading, matching the project's append-only convention.",
+        inputSchema: appendDocInput,
+      },
+      async ({ slug, filename, content }) => {
+        try {
+          await docs.append(slug, filename, content);
+          return jsonResult({ ok: true });
+        } catch (err) {
+          return errorResult(err instanceof Error ? err.message : "Unknown error");
+        }
+      },
+    );
 
-  server.registerTool(
-    "update_doc",
-    {
-      description:
-        `Replace a project doc's entire content (full overwrite, not an append). Fails if no doc with that filename exists yet — use append_doc to create one first. ${CONFIRM_FIRST_NOTICE}`,
-      inputSchema: updateDocInput,
-    },
-    async ({ slug, filename, content }) => {
-      try {
-        await docs.update(slug, filename, content);
-        return jsonResult({ ok: true });
-      } catch (err) {
-        return errorResult(err instanceof Error ? err.message : "Unknown error");
-      }
-    },
-  );
+    server.registerTool(
+      "update_doc",
+      {
+        description:
+          `Replace a project doc's entire content (full overwrite, not an append). Fails if no doc with that filename exists yet — use append_doc to create one first. ${CONFIRM_FIRST_NOTICE}`,
+        inputSchema: updateDocInput,
+      },
+      async ({ slug, filename, content }) => {
+        try {
+          await docs.update(slug, filename, content);
+          return jsonResult({ ok: true });
+        } catch (err) {
+          return errorResult(err instanceof Error ? err.message : "Unknown error");
+        }
+      },
+    );
 
-  server.registerTool(
-    "delete_doc",
-    {
-      description: `Permanently delete a project doc file. This cannot be undone. ${CONFIRM_FIRST_NOTICE}`,
-      inputSchema: deleteDocInput,
-    },
-    async ({ slug, filename }) => {
-      try {
-        await docs.delete(slug, filename);
-        return jsonResult({ ok: true });
-      } catch (err) {
-        return errorResult(err instanceof Error ? err.message : "Unknown error");
-      }
-    },
-  );
+    server.registerTool(
+      "delete_doc",
+      {
+        description: `Permanently delete a project doc file. This cannot be undone. ${CONFIRM_FIRST_NOTICE}`,
+        inputSchema: deleteDocInput,
+      },
+      async ({ slug, filename }) => {
+        try {
+          await docs.delete(slug, filename);
+          return jsonResult({ ok: true });
+        } catch (err) {
+          return errorResult(err instanceof Error ? err.message : "Unknown error");
+        }
+      },
+    );
+  }
 
   server.registerTool(
     "ask_memory",

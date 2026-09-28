@@ -8,9 +8,9 @@ import { ProjectsService } from "../projects";
 import { createShareLinkSchema, updateShareLinkSchema } from "./schema";
 import { shareUrl, SharesService } from "./service";
 
-// Mounted at /api/projects — authenticated the same way the rest of the REST
-// API is (i.e. not gated in code; whatever access control you put in front
-// of your main domain is what actually protects these in production).
+// Mounted at /api/projects — gated the same way the rest of the REST API is:
+// index.ts applies requireApiAuth (see modules/tokens/middleware.ts) to the
+// whole /api/projects/* prefix before these routes are ever reached.
 export const projectShareRoutes = new Hono<{ Bindings: Bindings }>();
 
 projectShareRoutes.get("/:slug/share", async (c) => {

@@ -93,6 +93,30 @@ export interface ShareMeta {
   allowDocs: boolean;
 }
 
+// Mirrors the server's tokenScopeSchema (server/src/modules/tokens/schema.ts).
+export type TokenScope = "admin" | "read_write" | "read_only";
+
+export interface AuthIdentity {
+  name: string;
+  scope: TokenScope;
+}
+
+export interface ApiToken {
+  id: string;
+  name: string;
+  scope: TokenScope;
+  createdAt: string;
+  expiresAt: string | null;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+}
+
+export interface CreateTokenInput {
+  name: string;
+  scope: TokenScope;
+  expiresIn: ExpirationOption;
+}
+
 /** Reads an SSE response body (from hono/streaming's streamSSE) and invokes
  *  `handlers` per event as it arrives. Hand-rolled rather than `EventSource`
  *  because this is a POST with a JSON body — EventSource only does GET.
@@ -328,4 +352,18 @@ export const api = {
     handlers: ChatStreamHandlers,
     signal?: AbortSignal,
   ) => postChatStream(`/share/${token}/chat`, { question, ...opts }, handlers, signal),
+  /** Exchanges a raw token for the httpOnly session cookie — see
+   *  server/src/modules/tokens/routes.ts. Every other `request()` call above
+   *  already rides that cookie for free (default same-origin fetch
+   *  credentials), so nothing else in this file needed to change for auth. */
+  login: (token: string) => request<AuthIdentity>("/auth/login", { method: "POST", body: JSON.stringify({ token }) }),
+  logout: () => request<{ ok: true }>("/auth/logout", { method: "POST" }),
+  /** Rejects with a 401-flavored Error when there's no valid session/bearer
+   *  credential yet — AuthGate treats that as "show the login page", not as
+   *  an unexpected failure. */
+  me: () => request<AuthIdentity>("/auth/me"),
+  listTokens: () => request<ApiToken[]>("/tokens"),
+  createToken: (input: CreateTokenInput) =>
+    request<ApiToken & { token: string }>("/tokens", { method: "POST", body: JSON.stringify(input) }),
+  revokeToken: (id: string) => request<{ ok: true }>(`/tokens/${id}`, { method: "DELETE" }),
 };

@@ -11,20 +11,22 @@ from `server/`.
    ids) — copy the template first:
    cp server/wrangler.toml.example server/wrangler.toml
 
-1. Get your D1 database id and your KV namespace id, and paste them into
-   server/wrangler.toml (run these from `server/`):
+1. Get your D1 database id and paste it into server/wrangler.toml (run this
+   from `server/`):
    wrangler d1 info dams_db
    # copy the uuid into database_id in wrangler.toml
-   wrangler kv namespace create OAUTH_KV
-   # copy the id into the OAUTH_KV [[kv_namespaces]] block in wrangler.toml
 
 2. Apply the schema to the remote database (not just --local this time), from
    the repo root:
    npm run db:migrate:remote
 
-3. Set the Anthropic key as a secret (never in wrangler.toml or committed
-   files) — from `server/`:
+3. Set secrets (never in wrangler.toml or committed files) — from `server/`:
    wrangler secret put ANTHROPIC_API_KEY
+   wrangler secret put DAMS_ADMIN_TOKEN
+   # DAMS_ADMIN_TOKEN is the break-glass/bootstrap credential for the token
+   # auth layer (see CLAUDE.md's "MCP + token auth conventions") — any
+   # random string. Log into the web UI with it once, create a real
+   # `admin`-scoped token from the Tokens page, and prefer that afterward.
 
 4. Deploy — from the repo root. This builds the client workspace into
    `client/dist` and then runs `wrangler deploy` in `server/`, which serves
@@ -37,8 +39,11 @@ from `server/`.
    Cloudflare will prompt you to confirm the DNS record if it isn't already
    proxied through your zone.
 
-6. Smoke test (substitute your own domain):
+6. Smoke test (substitute your own domain and DAMS_ADMIN_TOKEN value):
    curl https://memory.example.com/api
    curl -X POST https://memory.example.com/api/projects \
      -H 'content-type: application/json' \
+     -H 'authorization: Bearer <your DAMS_ADMIN_TOKEN>' \
      -d '{"slug":"ghoraf","title":"Ghoraf"}'
+   # /api/* requires a credential now — either this bearer header, or the
+   # session cookie the web UI sets after you log in at "/" with a token.

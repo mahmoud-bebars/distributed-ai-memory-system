@@ -60,4 +60,4 @@ Contributing? See [CONTRIBUTING.md](CONTRIBUTING.md).
 ## Status
 
 See [docs/PROJECT_UNDERSTANDING.md](docs/PROJECT_UNDERSTANDING.md) for the
-full architecture and what's still ahead (MCP tool layer, OAuth, sync CLI).
+full architecture and what's still ahead (local sync CLI, real chat retrieval).

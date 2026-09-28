@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, type Project } from "@/api";
+import { api, type AuthIdentity, type Project } from "@/api";
 import { CreateProjectPage } from "@/components/CreateProjectPage";
 import { GuidePage } from "@/components/GuidePage";
 import { ModeToggle } from "@/components/mode-toggle";
@@ -7,12 +7,19 @@ import { ProjectSwitcher } from "@/components/ProjectSwitcher";
 import { ProjectsOverview } from "@/components/ProjectsOverview";
 import { ProjectView } from "@/components/ProjectView";
 import { ShortcutsHelp } from "@/components/ShortcutsHelp";
+import { TokensPage } from "@/components/TokensPage";
 import { Button } from "@/components/ui/button";
-import { BookOpen, Brain } from "lucide-react";
+import { BookOpen, Brain, KeyRound, LogOut } from "lucide-react";
 
-type View = "browse" | "guide" | "create";
+type View = "browse" | "guide" | "tokens" | "create";
 
-export default function App() {
+export default function App({
+  identity,
+  onLogout,
+}: {
+  identity: AuthIdentity;
+  onLogout: () => void;
+}) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [view, setView] = useState<View>("browse");
@@ -74,6 +81,8 @@ export default function App() {
       ? "New project"
       : view === "guide"
       ? "Guide"
+      : view === "tokens"
+      ? "Tokens"
       : selectedProject?.title ?? "DAMS";
 
   return (
@@ -111,11 +120,27 @@ export default function App() {
         >
           <BookOpen className="size-4" />
         </Button>
+        {identity.scope === "admin" && (
+          <Button
+            variant={view === "tokens" ? "secondary" : "ghost"}
+            size="icon"
+            title="Tokens"
+            aria-label="Tokens"
+            onClick={() => setView((v) => (v === "tokens" ? "browse" : "tokens"))}
+          >
+            <KeyRound className="size-4" />
+          </Button>
+        )}
+        <Button variant="ghost" size="icon" title="Log out" aria-label="Log out" onClick={onLogout}>
+          <LogOut className="size-4" />
+        </Button>
         <ModeToggle />
       </header>
       <main className="min-h-0 flex-1 overflow-hidden p-4">
         {view === "guide" ? (
           <GuidePage />
+        ) : view === "tokens" ? (
+          <TokensPage />
         ) : view === "create" ? (
           <CreateProjectPage
             onCreated={handleCreated}

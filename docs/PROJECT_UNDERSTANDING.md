@@ -52,20 +52,16 @@ wrapper calling the same `ProjectsService`/`ChatService` methods — this
 was the deliberate build order (validate storage and logic in isolation
 via curl before adding a second, harder-to-debug protocol layer on top).
 
-## Auth plan
+## Auth plan (superseded 2026-09-28 — see "Current status" and CLAUDE.md)
 
-Two different things need gating, and they're not the same mechanism:
-
-- **The web UI** — single user, low stakes. Cloudflare Access (Zero
-  Trust) with an email allow-list; configured in the dashboard (see
-  "Current status" below for the one deliberate carve-out).
-- **The MCP endpoint** — Claude, ChatGPT, and Gemini all expect a real
-  OAuth 2.1 resource-server handshake, not a cookie. Plan is
-  `@cloudflare/workers-oauth-provider`, using GitHub as the upstream
-  identity provider (single-user allow-list check on GitHub username
-  during the `/authorize` step), following Cloudflare's
-  `remote-mcp-github-oauth` reference pattern. This only needs to gate the
-  future `/mcp` route — it should not wrap the REST API or the UI.
+Original plan, kept here for history: gate the web UI with Cloudflare
+Access alone (no in-Worker check) and gate `/mcp` separately with
+`@cloudflare/workers-oauth-provider` + GitHub as the upstream identity
+provider. That shipped, but left `/api/*` with no Worker-side auth at all
+— which turned out to matter the day Access itself was found
+misconfigured wide open on the share hostname (see CLAUDE.md's in-code
+host-guard note). The whole app now uses one mechanism instead — see
+"Current status" below and CLAUDE.md's "MCP + token auth conventions".
 
 ## Current status
 
@@ -82,24 +78,31 @@ filtering, a manual refresh control, and an Export control (pretty JSON
 of the fetched view, or the byte-for-byte raw `.jsonl` from the raw
 route).
 
-The **MCP layer and OAuth are now built** (`server/src/modules/mcp` and
-`server/src/modules/auth`). `/mcp` exposes five tools — `list_projects`,
-`read_memory`, `append_memory`, `update_entity`, `ask_memory` — as thin
-wrappers over the existing services (no `create_project`; project
-creation stays REST-only). It runs stateless per the MCP 2026-07-28 spec:
-no Durable Object, just a throwaway server + Web Standard Streamable HTTP
-transport per request. Only `/mcp` is gated, by
-`@cloudflare/workers-oauth-provider` with GitHub as the upstream IdP,
-restricted to a single `ALLOWED_GITHUB_USER` checked during the OAuth
-callback. `/api/*` and the web UI are untouched.
+The **MCP layer is built** (`server/src/modules/mcp`). `/mcp` exposes seven
+tools — `list_projects`, `read_memory`, `append_memory`, `update_entity`,
+`append_doc`, `update_doc`, `delete_doc`, `ask_memory` — as thin wrappers
+over the existing services (no `create_project`; project creation stays
+REST-only). It runs stateless per the MCP 2026-07-28 spec: no Durable
+Object, just a throwaway server + Web Standard Streamable HTTP transport
+per request.
 
-**Cloudflare Access is now on** for the main deployment domain (the
-zero-trust/zone-level dashboard step this doc used to list as outstanding
-has since been done). The `SHARE_HOSTNAME` domain (see CLAUDE.md and
-`server/src/lib/bindings.ts`) is the one hostname deliberately left
-outside it, gated instead by a path-scoped Access bypass policy
-(`/mcp`, `/.well-known/*`, `/authorize`, `/token`, `/register`,
-`/callback` — configured in the dashboard, not in this repo).
+**Auth was rebuilt 2026-09-28** (`server/src/modules/tokens`), replacing
+both GitHub OAuth on `/mcp` and bare reliance on Cloudflare Access for
+`/api/*`, with one mechanism: hashed `dams_…` bearer tokens in D1, scoped
+`admin`/`read_write`/`read_only`, create/list/revoke from a web UI Tokens
+page. Every route is gated in code now (`requireApiAuth`, applied in
+`server/src/index.ts`) — there's no longer a route implicitly relying on
+whatever sits in front of the domain. See CLAUDE.md's "MCP + token auth
+conventions" for the mechanism.
+
+**Cloudflare Access is still on** for the main deployment domain, as an
+*additional* edge-level layer — the Worker no longer depends on it for
+correctness, but it hasn't been removed. The `SHARE_HOSTNAME` domain (see
+CLAUDE.md and `server/src/lib/bindings.ts`) is the one hostname
+deliberately left outside it, gated instead by a path-scoped Access bypass
+policy (`/mcp`, `/.well-known/*`, `/share/*`, `/api/share/*` — configured
+in the dashboard, not in this repo; the OAuth-only paths this list used to
+carry — `/authorize`, `/token`, `/register`, `/callback` — no longer exist).
 
 **Shareable read-only project links are now built** (`server/src/modules/shares`,
 `client/src/components/ShareView.tsx`/`ShareDialog.tsx`). A project owner
@@ -112,9 +115,11 @@ adding to that same dashboard bypass policy — see CLAUDE.md's "Shareable
 read-only links" section for the full mechanism.
 
 The web app also now has an in-app **Guide** page (MCP connect command,
-auth flow, live tool list) and per-project **Prompts** tab (seed/sync
-templates for driving a Claude Code session to write memory for a repo) —
-see CLAUDE.md's frontend-conventions section.
+token instructions, live tool list), a **Tokens** page (admin-scoped
+sessions only — create/list/revoke), a **Login** page (paste a token, sets
+the session cookie), and a per-project **Prompts** tab (seed/sync templates
+for driving a Claude Code session to write memory for a repo) — see
+CLAUDE.md's frontend-conventions section.
 
 Still outstanding:
 
@@ -122,7 +127,6 @@ Still outstanding:
   scheme so sync stays a conflict-free set union.
 - **Retrieval for chat** — still the naive full-dump; see CLAUDE.md.
 
-Deployment prerequisites for `/mcp`: a GitHub OAuth App, the secrets
-`GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` / `COOKIE_ENCRYPTION_KEY`, the
-`ALLOWED_GITHUB_USER` var, and the `OAUTH_KV` namespace (all noted in
-wrangler.toml).
+Deployment prerequisite for auth: one secret, `DAMS_ADMIN_TOKEN` (see
+CLAUDE.md's "MCP + token auth conventions" and `server/wrangler.toml.example`)
+— the break-glass credential used to log in once and create real tokens.

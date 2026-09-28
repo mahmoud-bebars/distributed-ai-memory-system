@@ -46,3 +46,25 @@ export const projectShares = sqliteTable("project_shares", {
 
 export type ProjectShareRow = typeof projectShares.$inferSelect;
 export type NewProjectShareRow = typeof projectShares.$inferInsert;
+
+// Bearer tokens for /api/* and /mcp — the app's only credential type. The
+// raw token is never stored, only its SHA-256 hex digest (tokenHash);
+// revoking a row (revokedAt) invalidates both direct bearer use and any
+// browser session cookie, since the cookie's value is the raw token itself
+// (see modules/tokens).
+export const apiTokens = sqliteTable("api_tokens", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  tokenHash: text("token_hash").notNull(),
+  scope: text("scope").notNull(), // "admin" | "read_write" | "read_only"
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
+  // Null means "never expires".
+  expiresAt: text("expires_at"),
+  lastUsedAt: text("last_used_at"),
+  revokedAt: text("revoked_at"),
+});
+
+export type ApiTokenRow = typeof apiTokens.$inferSelect;
+export type NewApiTokenRow = typeof apiTokens.$inferInsert;

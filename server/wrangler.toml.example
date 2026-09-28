@@ -20,10 +20,6 @@ database_id = "<YOUR_D1_DATABASE_ID>"          # wrangler d1 info dams_db
 binding = "DAMS_BUCKET"
 bucket_name = "dmas"
 
-[[kv_namespaces]]
-binding = "OAUTH_KV"
-id = "<YOUR_KV_NAMESPACE_ID>"                  # wrangler kv namespace create OAUTH_KV
-
 [assets]
 directory = "../client/dist"
 binding = "ASSETS"
@@ -34,25 +30,19 @@ not_found_handling = "single-page-application"
 
 [vars]
 ENVIRONMENT = "development"
-# The single GitHub login allowed to complete the /mcp OAuth flow. Not
-# sensitive (it's a public username), so it lives here as a var — but you MUST
-# set it to your own login before deploying. Leaving it empty means nobody can
-# authenticate. Alternatively override with: wrangler secret put ALLOWED_GITHUB_USER
-ALLOWED_GITHUB_USER = ""
 # Optional. Set this only if you want a second hostname (e.g. share.example.com,
 # uncommented in `routes` above) left outside whatever access control you put
-# in front of memory.example.com, so share-link recipients and the /mcp OAuth
-# flow can still be reached. See CLAUDE.md's "Shareable read-only links"
-# section. Leave unset (or delete this line) if you don't need that — share
-# links then just resolve on whatever host served the request.
+# in front of memory.example.com, so share-link recipients and /mcp clients
+# can still be reached. See CLAUDE.md's "Shareable read-only links" section.
+# Leave unset (or delete this line) if you don't need that — share links then
+# just resolve on whatever host served the request.
 # SHARE_HOSTNAME = "share.example.com"
 
 # Secrets — set each with `wrangler secret put <NAME>` (and mirror them in a
 # local, git-ignored .dev.vars for `wrangler dev`):
-#   wrangler secret put ANTHROPIC_API_KEY      # existing — chat-with-memory
-#   wrangler secret put GITHUB_CLIENT_ID       # GitHub OAuth App client id
-#   wrangler secret put GITHUB_CLIENT_SECRET   # GitHub OAuth App client secret
-#   wrangler secret put COOKIE_ENCRYPTION_KEY  # random 32-byte hex; signs the
-#                                              # consent/approval cookies
-#
-# OAUTH_KV (above) backs the OAuthProvider's grant/state storage.
+#   wrangler secret put ANTHROPIC_API_KEY   # existing — chat-with-memory
+#   wrangler secret put DAMS_ADMIN_TOKEN    # break-glass bootstrap credential for
+#                                            # the token auth layer (see
+#                                            # src/modules/tokens) — log into the
+#                                            # web UI with it once to create your
+#                                            # first real token, then prefer that.

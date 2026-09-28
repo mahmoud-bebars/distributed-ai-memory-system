@@ -3,7 +3,7 @@
 ## Repo layout
 
 npm workspaces monorepo, two workspaces under one root `package.json`:
-`server/` (the Cloudflare Worker — Hono, D1, R2, MCP/OAuth) and `client/`
+`server/` (the Cloudflare Worker — Hono, D1, R2, MCP, token auth) and `client/`
 (the Vite/React frontend, built into `client/dist` and served by the Worker
 as static assets). Run `npm install` once from the repo root. Root-level
 `npm run <script>` commands delegate to the right workspace — see
@@ -66,20 +66,52 @@ as static assets). Run `npm install` once from the repo root. Root-level
   content. It fails clearly if no entity with that name exists yet —
   creating one is still `append_memory`'s job.
 
-## MCP + OAuth conventions (added with the /mcp layer)
+## MCP + token auth conventions (replaced GitHub OAuth 2026-09-28)
 
-- MCP tools are thin wrappers, no new logic. `server/src/modules/mcp` follows the
-  4-file pattern with one adaptation: `service.ts` exports a
-  `buildMemoryMcpServer(env)` factory that registers tools by delegating
-  straight to `ProjectsService`/`ChatService`, and `routes.ts` exports a
-  plain `ExportedHandler` (`mcpHandler`) instead of a Hono router — the
-  OAuthProvider wants a bare fetch handler for its `apiHandler`.
+- The whole app has exactly one credential type: opaque `dams_…` bearer
+  tokens, hashed (SHA-256, never stored raw) in D1's `api_tokens` table
+  (migration `0004_api_tokens.sql`). `server/src/modules/tokens` owns them,
+  4-file pattern plus one adaptation — `middleware.ts` — for the same
+  reason `mcp`'s `service.ts` factory is an adaptation: this is Hono
+  cross-cutting infrastructure, not a route handler or a service method.
+  - `TokensService` (`service.ts`): `create`/`list`/`revoke`/`verify`/
+    `touchLastUsed`. `verify(raw)` is the one function everything else
+    (REST auth, `/mcp` auth, browser login) ultimately calls.
+  - `requireApiAuth({ minScope? })` (`middleware.ts`) is the Hono
+    middleware factory mounted in `index.ts`. Default `minScope` is
+    method-based (GET/HEAD → `read_only`, else → `read_write`); pass it
+    explicitly to override (`admin` for `/api/tokens`, `read_only` for
+    `/mcp`, since every MCP request is a POST and can't be split by
+    method the way REST routes are).
+  - Three scopes, ranked `read_only < read_write < admin` — see
+    `SCOPE_RANK` in `middleware.ts`. There is no per-project scoping;
+    a token's scope applies across every project.
+- Browser sessions and bearer use share one code path, not two. A login
+  (`POST /api/auth/login`) doesn't create a server-side session — it just
+  sets an httpOnly cookie **whose value is the raw token itself**. Revoking
+  the underlying `api_tokens` row therefore invalidates a bearer use of it
+  and any browser logged in with it, simultaneously, for free. This also
+  means `client/src/api.ts`'s `request()` needed zero changes for auth:
+  every existing `fetch()` call already uses default (same-origin)
+  credentials, which include cookies automatically.
+- `DAMS_ADMIN_TOKEN` (a Worker secret, `server/src/lib/bindings.ts`) is the
+  break-glass/bootstrap credential: constant-time-compared (as a hashed
+  digest, in `matchesAdminToken`) against whatever's presented, always
+  resolves to `admin` scope, and is **not** a database row — there's
+  nothing to revoke, only to stop using once real tokens exist.
 - `/mcp` is stateless. Under the MCP 2026-07-28 spec the session handshake
   (`Mcp-Session-Id`) is gone, so each request builds a throwaway
   `McpServer` + `WebStandardStreamableHTTPServerTransport`
   (`sessionIdGenerator: undefined`). No Durable Object / `McpAgent` — a
   single-user server doesn't need one. Don't reintroduce DO state unless a
   feature genuinely requires cross-request session memory.
+- `buildMemoryMcpServer(env, scope)` (`server/src/modules/mcp/service.ts`)
+  takes the resolved scope and only *registers* the mutating tools
+  (`append_memory`, `update_entity`, `append_doc`, `update_doc`,
+  `delete_doc`) when it's `read_write`/`admin` — a `read_only` token's
+  `tools/list` never even lists them. This is the one place scope
+  enforcement happens below the top-level `requireApiAuth` check, and it
+  exists specifically because `/mcp` can't use HTTP-method-based scoping.
 - Always pass `CfWorkerJsonSchemaValidator` to `new McpServer`. The SDK's
   Ajv default compiles schemas with `new Function`, which the Workers
   runtime forbids.
@@ -87,16 +119,15 @@ as static assets). Run `npm install` once from the repo root. Root-level
   `registerTool` expects), and `append_memory` reuses `memoryEntrySchema`
   from the projects module rather than redefining the entry shape.
   `update_entity` similarly reuses `entityCategorySchema`.
-- OAuth wiring lives in `server/src/modules/auth`. `workers-oauth-utils.ts` is
-  vendored from Cloudflare's `remote-mcp-github-oauth` reference (CSRF +
-  session-bound state + signed approval cookies) — treat it as vendored
-  code, keep changes minimal. `github-handler.ts` owns `/authorize` and
-  `/callback`; the single-user allow-list (`ALLOWED_GITHUB_USER`) is
-  enforced in `/callback`, the first point we know the real GitHub login.
-- Only `/mcp` is gated. In `server/src/index.ts` the whole existing Hono app
-  (REST + auth routes + asset fallback) is the OAuthProvider
-  `defaultHandler`; `apiRoute` is `/mcp` alone. Never widen `apiRoute` to
-  cover `/api/*` or the assets — those stay unauthenticated by design.
+- Every route is gated in code now. `server/src/index.ts` applies
+  `requireApiAuth` to `/api/tokens/*` (admin) and `/api/projects/*`
+  (method-based) and to `/mcp` (`read_only` minimum) before those routes
+  are ever reached; only `/api/auth/login`, `/api/auth/logout`, and the
+  public `/api/share/*` routes are reachable without a credential. There
+  is no OAuthProvider wrapper anymore — `index.ts` exports the Hono `app`
+  directly. Cloudflare Access, if you still have it in front of your
+  domain, is now an *additional* edge-level layer, not something the
+  Worker depends on for correctness.
 
 ## Shareable read-only links
 
@@ -119,8 +150,9 @@ as static assets). Run `npm install` once from the repo root. Root-level
   out of chat answers too, not just out of the Docs tab).
 - Two route groups, both mounted in `server/src/index.ts`: `projectShareRoutes`
   (`GET`/`POST /api/projects/:slug/share`, `PATCH`/`DELETE
-  /api/projects/:slug/share/:token`, authenticated the same loose way the
-  rest of `/api/*` is) and `publicShareRoutes` (`GET /api/share/:token` for
+  /api/projects/:slug/share/:token`, gated by the same `requireApiAuth` on
+  `/api/projects/*` as the rest of that prefix) and `publicShareRoutes`
+  (`GET /api/share/:token` for
   link metadata, `GET /api/share/:token/memory`, docs, and
   `POST /api/share/:token/chat`, deliberately unauthenticated — the token
   *is* the auth). An unknown, expired, or permission-gated-off token always
@@ -135,9 +167,13 @@ as static assets). Run `npm install` once from the repo root. Root-level
   access control to give. **That access control's own configuration lives
   wherever you set it up (e.g. the Cloudflare dashboard for Access), not in
   this repo** — it needs to bypass auth for `/mcp`, `/.well-known/*`,
-  `/authorize`, `/token`, `/register`, `/callback`, `/share/*`, and
-  `/api/share/*` on that hostname. No amount of Worker code changes this;
-  that check happens at the edge before a request ever reaches this Worker.
+  `/share/*`, and `/api/share/*` on that hostname (since 2026-09-28's move
+  to token auth, `/mcp` itself enforces a bearer token in code, so bypassing
+  Access there just hands the request to the Worker's own check — it no
+  longer needs to reach an OAuth flow's `/authorize`/`/token`/`/register`/
+  `/callback`, which don't exist anymore). No amount of Worker code changes
+  this; that check happens at the edge before a request ever reaches this
+  Worker.
 - **In-code host guard, `server/src/index.ts` (added 2026-09-08, generalized
   to `env.SHARE_HOSTNAME` when the repo went client/server + open source).**
   This exists because, on the original deployment, the dashboard-side access
@@ -146,9 +182,9 @@ as static assets). Run `npm install` once from the repo root. Root-level
   reachable there completely unauthenticated. A `Hono` middleware (first
   thing registered on `app`) enforces the same allow-list in code: if
   `SHARE_HOSTNAME` is set and the request's `Host` header matches it, only
-  `/mcp`, `/authorize`, `/token`, `/register`, `/callback`, `/.well-known/*`,
-  `/share/*`, `/api/share/*`, and `/assets/*` pass through; everything else
-  404s. It's a no-op if `SHARE_HOSTNAME` is unset. This is a stopgap, not a
+  `/mcp`, `/.well-known/*`, `/share/*`, `/api/share/*`, and `/assets/*` pass
+  through; everything else 404s. It's a no-op if `SHARE_HOSTNAME` is unset.
+  This is a stopgap, not a
   fix for the underlying access-control misconfiguration — verify that
   configuration itself before ever removing this guard, don't just assume
   it's fine because this code exists. Static assets (`/`, favicons,

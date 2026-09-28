@@ -3,7 +3,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 // Built from wherever this page is being served, not hardcoded — a self-hosted
 // deployer's Guide page should show their own domain, not the original author's.
-const CONNECT_COMMAND = `claude mcp add --transport http dams ${window.location.origin}/mcp --scope user`;
+// The token itself isn't filled in here (it's shown once, on the Tokens
+// page, at creation time) — swap the placeholder for that value.
+const CONNECT_COMMAND = `claude mcp add --transport http dams ${window.location.origin}/mcp --scope user --header "Authorization: Bearer dams_..."`;
 
 // Kept in sync by hand with src/modules/mcp/service.ts's registerTool calls —
 // there's no build-time link between this page and that file, so if a tool
@@ -46,29 +48,35 @@ export function GuidePage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>1. Add the MCP connector</CardTitle>
+          <CardTitle>1. Create a token</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-2">
+        <CardContent>
           <p className="text-sm text-muted-foreground">
-            Run this once, from any machine, in a terminal with Claude Code installed:
+            On the <span className="font-medium text-foreground">Tokens</span> page, create one
+            scoped to <code className="text-xs">read_write</code> (or{" "}
+            <code className="text-xs">read_only</code> for a client that should never mutate
+            anything) and copy it — it's shown exactly once.
           </p>
-          <div className="flex items-center gap-2 rounded-md border bg-muted/40 p-2.5">
-            <code className="flex-1 overflow-x-auto text-xs whitespace-pre">{CONNECT_COMMAND}</code>
-            <CopyButton text={CONNECT_COMMAND} size="sm" />
-          </div>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>2. Authenticate</CardTitle>
+          <CardTitle>2. Add the MCP connector</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-2">
           <p className="text-sm text-muted-foreground">
-            Start a Claude Code session and run <code className="text-xs">/mcp</code>. It opens a
-            GitHub login in your browser — only the single allow-listed GitHub account can
-            complete it. Once authenticated, Claude Code can call the tools below against any
-            project in this store.
+            Run this once per machine, in a terminal with Claude Code installed, swapping in the
+            token you just created:
+          </p>
+          <div className="flex items-center gap-2 rounded-md border bg-muted/40 p-2.5">
+            <code className="flex-1 overflow-x-auto text-xs whitespace-pre">{CONNECT_COMMAND}</code>
+            <CopyButton text={CONNECT_COMMAND} size="sm" />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            No further login step — the token in that header is the whole credential.
+            <code className="text-xs">read_only</code> tokens simply never see the mutating
+            tools below.
           </p>
         </CardContent>
       </Card>
