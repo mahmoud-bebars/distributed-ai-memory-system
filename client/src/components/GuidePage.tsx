@@ -1,5 +1,5 @@
 import { CopyButton } from "@/components/CopyButton";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 
 // Built from wherever this page is being served, not hardcoded — a self-hosted
 // deployer's Guide page should show their own domain, not the original author's.
@@ -36,6 +36,12 @@ const TOOLS: { name: string; description: string }[] = [
   },
 ];
 
+// Each step collapses so the page never grows taller than the viewport
+// regardless of how much a step's content ends up saying — a fixed set of
+// Cards stacked top to bottom had no such ceiling, and grew past visible
+// height as steps gained more detail (e.g. the project-restriction note
+// below). "1. Create a token" starts open since it's the immediate next
+// action for a first-time visitor; the rest are one click away.
 export function GuidePage() {
   return (
     <div className="mx-auto flex h-full max-w-2xl flex-col gap-4 overflow-y-auto pb-8">
@@ -46,75 +52,74 @@ export function GuidePage() {
         </p>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>1. Create a token</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground">
-            On the <span className="font-medium text-foreground">Tokens</span> page, create one
-            scoped to <code className="text-xs">read_write</code> (or{" "}
-            <code className="text-xs">read_only</code> for a client that should never mutate
-            anything) and copy it — it's shown exactly once.
-          </p>
-          <p className="text-sm text-muted-foreground">
-            For an internet-facing or otherwise untrusted agent, restrict the token to specific
-            projects in the picker — it will only ever see or act on those, and every other
-            project 404s as if it didn't exist.
-          </p>
-        </CardContent>
-      </Card>
+      <Accordion
+        type="single"
+        collapsible
+        defaultValue="create-token"
+        className="rounded-xl border border-border bg-card px-4"
+      >
+        <AccordionItem value="create-token">
+          <AccordionTrigger>1. Create a token</AccordionTrigger>
+          <AccordionContent className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              On the <span className="font-medium text-foreground">Tokens</span> page, create one
+              scoped to <code className="text-xs">read_write</code> (or{" "}
+              <code className="text-xs">read_only</code> for a client that should never mutate
+              anything) and copy it — it's shown exactly once.
+            </p>
+            <p className="text-sm text-muted-foreground">
+              For an internet-facing or otherwise untrusted agent, restrict the token to specific
+              projects in the picker — it will only ever see or act on those, and every other
+              project 404s as if it didn't exist.
+            </p>
+          </AccordionContent>
+        </AccordionItem>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>2. Add the MCP connector</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          <p className="text-sm text-muted-foreground">
-            Run this once per machine, in a terminal with Claude Code installed, swapping in the
-            token you just created:
-          </p>
-          <div className="flex items-center gap-2 rounded-md border bg-muted/40 p-2.5">
-            <code className="flex-1 overflow-x-auto text-xs whitespace-pre">{CONNECT_COMMAND}</code>
-            <CopyButton text={CONNECT_COMMAND} size="sm" />
-          </div>
-          <p className="text-xs text-muted-foreground">
-            No further login step — the token in that header is the whole credential.
-            <code className="text-xs">read_only</code> tokens simply never see the mutating
-            tools below.
-          </p>
-        </CardContent>
-      </Card>
+        <AccordionItem value="connect-mcp">
+          <AccordionTrigger>2. Add the MCP connector</AccordionTrigger>
+          <AccordionContent className="space-y-2">
+            <p className="text-sm text-muted-foreground">
+              Run this once per machine, in a terminal with Claude Code installed, swapping in the
+              token you just created:
+            </p>
+            <div className="flex items-center gap-2 rounded-md border bg-muted/40 p-2.5">
+              <code className="flex-1 overflow-x-auto text-xs whitespace-pre">{CONNECT_COMMAND}</code>
+              <CopyButton text={CONNECT_COMMAND} size="sm" />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              No further login step — the token in that header is the whole credential.
+              <code className="text-xs">read_only</code> tokens simply never see the mutating
+              tools below.
+            </p>
+          </AccordionContent>
+        </AccordionItem>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>3. Available tools</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ul className="space-y-3">
-            {TOOLS.map((tool) => (
-              <li key={tool.name}>
-                <code className="text-sm font-medium">{tool.name}</code>
-                <p className="text-sm text-muted-foreground">{tool.description}</p>
-              </li>
-            ))}
-          </ul>
-        </CardContent>
-      </Card>
+        <AccordionItem value="tools">
+          <AccordionTrigger>3. Available tools</AccordionTrigger>
+          <AccordionContent>
+            <ul className="space-y-3">
+              {TOOLS.map((tool) => (
+                <li key={tool.name}>
+                  <code className="text-sm font-medium">{tool.name}</code>
+                  <p className="text-sm text-muted-foreground">{tool.description}</p>
+                </li>
+              ))}
+            </ul>
+          </AccordionContent>
+        </AccordionItem>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>If something's not connecting</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground">
-            Run <code className="text-xs">claude mcp get dams</code> for the specific error. Most
-            connection issues so far have been Cloudflare Access intercepting a path it shouldn't
-            — check the Access application's path rules before assuming the Worker code is at
-            fault.
-          </p>
-        </CardContent>
-      </Card>
+        <AccordionItem value="troubleshooting">
+          <AccordionTrigger>If something's not connecting</AccordionTrigger>
+          <AccordionContent>
+            <p className="text-sm text-muted-foreground">
+              Run <code className="text-xs">claude mcp get dams</code> for the specific error. Most
+              connection issues so far have been Cloudflare Access intercepting a path it shouldn't
+              — check the Access application's path rules before assuming the Worker code is at
+              fault.
+            </p>
+          </AccordionContent>
+        </AccordionItem>
+      </Accordion>
     </div>
   );
 }
