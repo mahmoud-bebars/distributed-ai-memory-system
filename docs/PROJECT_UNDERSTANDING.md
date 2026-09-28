@@ -95,19 +95,21 @@ page. Every route is gated in code now (`requireApiAuth`, applied in
 whatever sits in front of the domain. See CLAUDE.md's "MCP + token auth
 conventions" for the mechanism.
 
-**Cloudflare Access is still on** for the main deployment domain, as an
+**Cloudflare Access is still on** for the deployment domain, as an
 *additional* edge-level layer — the Worker no longer depends on it for
-correctness, but it hasn't been removed. The `SHARE_HOSTNAME` domain (see
-CLAUDE.md and `server/src/lib/bindings.ts`) is the one hostname
-deliberately left outside it, gated instead by a path-scoped Access bypass
-policy (`/mcp`, `/.well-known/*`, `/share/*`, `/api/share/*` — configured
-in the dashboard, not in this repo; the OAuth-only paths this list used to
-carry — `/authorize`, `/token`, `/register`, `/callback` — no longer exist).
+correctness, but it hasn't been removed. This deployment runs single-domain
+(`SHARE_HOSTNAME` unset, 2026-09-28) rather than carving out a second
+hostname for `/mcp`/`/share/*`, so the same path-scoped Access bypass
+policy (`/mcp`, `/.well-known/*`, `/share/*`, `/api/share/*`) needs to be
+configured **on `memory.mahmoudbebars.dev` itself** — configured in the
+dashboard, not in this repo — otherwise MCP clients (which can't complete
+an interactive Access login) and share-link recipients (who have no Access
+identity at all) get an Access redirect instead of reaching the Worker.
 
 **Shareable read-only project links are now built** (`server/src/modules/shares`,
 `client/src/components/ShareView.tsx`/`ShareDialog.tsx`). A project owner
 generates an unguessable token from the authenticated app; anyone with
-`https://<SHARE_HOSTNAME>/share/:token` sees that one project's
+`https://memory.mahmoudbebars.dev/share/:token` sees that one project's
 Graph and Entries tabs, read-only, with no login and no visibility into
 any other project. This is why the token endpoint
 (`GET /api/share/:token/memory`) and the `/share/*` frontend route needed
