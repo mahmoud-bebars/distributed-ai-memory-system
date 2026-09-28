@@ -67,11 +67,18 @@ default).
    Authorize Cloudflare's GitHub App on this repo if you haven't already,
    pick the repo and the branch that should auto-deploy (e.g. `main`).
 
-2. Set:
-   - **Root directory**: `server`
+2. Set (leave the Advanced "Path" field at its default, `/` — the commands
+   below don't depend on it, since Workers Builds' exact working-directory
+   semantics for that field aren't worth relying on):
    - **Build command**:
-     `cd .. && npm install && npm run build && cd server && bash scripts/render-wrangler-toml.sh`
-   - **Deploy command**: `npx wrangler deploy`
+     `npm install && npm run build && bash server/scripts/render-wrangler-toml.sh`
+   - **Deploy command**: `npx wrangler deploy --config server/wrangler.toml`
+
+   Both run from the repo root regardless of Path, which is also what
+   `npm install` needs anyway for the two workspaces (`client`/`server`) to
+   link correctly. `wrangler deploy --config` resolves the `[assets]
+   directory = "../client/dist"` path relative to wrangler.toml's own
+   location either way, so this works whether Path is `/` or `/server`.
 
 3. Add two **Build variables** (plain, not secrets):
    - `WRANGLER_D1_DATABASE_ID` — from `wrangler d1 info dams_db`
