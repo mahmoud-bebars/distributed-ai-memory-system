@@ -1,11 +1,20 @@
 import { useEffect, useState } from "react";
-import { api, type ApiToken, type CreateTokenInput, type ExpirationOption, type TokenScope } from "@/api";
+import { api, type ApiToken, type CreateTokenInput, type ExpirationOption, type Project, type TokenScope } from "@/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CopyButton } from "@/components/CopyButton";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -37,6 +46,10 @@ function expiryText(expiresAt: string | null): string {
   return days === 1 ? "Expires in 1 day" : `Expires in ${days} days`;
 }
 
+function projectsText(projects: string[] | null): string {
+  return projects === null ? "All projects" : projects.join(", ");
+}
+
 function TokenRow({ token, onRevoke, busy }: { token: ApiToken; onRevoke: () => void; busy: boolean }) {
   const revoked = token.revokedAt !== null;
   return (
@@ -51,6 +64,7 @@ function TokenRow({ token, onRevoke, busy }: { token: ApiToken; onRevoke: () => 
           {revoked ? "Revoked" : expiryText(token.expiresAt)} ·{" "}
           {token.lastUsedAt ? `Last used ${new Date(token.lastUsedAt).toLocaleString()}` : "Never used"}
         </p>
+        <p className="truncate text-xs text-muted-foreground">{projectsText(token.projects)}</p>
       </div>
       {!revoked && (
         <Button variant="ghost" size="icon-sm" title="Revoke token" onClick={onRevoke} disabled={busy}>
@@ -61,10 +75,72 @@ function TokenRow({ token, onRevoke, busy }: { token: ApiToken; onRevoke: () => 
   );
 }
 
+/** Multi-select of project slugs, backing a token's optional allow-list.
+ *  `null` means "All projects" (the default, and the only valid value for
+ *  an admin-scope token — the caller disables this control in that case). */
+function ProjectsMultiSelect({
+  projects,
+  selected,
+  onChange,
+  disabled,
+}: {
+  projects: Project[];
+  selected: string[] | null;
+  onChange: (slugs: string[] | null) => void;
+  disabled: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+
+  function toggle(slug: string) {
+    const current = selected ?? [];
+    const next = current.includes(slug) ? current.filter((s) => s !== slug) : [...current, slug];
+    onChange(next.length === 0 ? null : next);
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full justify-start font-normal"
+          disabled={disabled}
+        >
+          {disabled ? "All projects (admin)" : projectsText(selected)}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-64 p-0" align="start">
+        <Command>
+          <CommandInput placeholder="Search projects…" />
+          <CommandList>
+            <CommandEmpty>No projects found.</CommandEmpty>
+            <CommandGroup>
+              {projects.map((project) => {
+                const checked = selected?.includes(project.slug) ?? false;
+                return (
+                  <CommandItem
+                    key={project.slug}
+                    data-checked={checked}
+                    onSelect={() => toggle(project.slug)}
+                  >
+                    {project.title}
+                    <span className="text-xs text-muted-foreground">{project.slug}</span>
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 const EMPTY_FORM: CreateTokenInput = { name: "", scope: "read_write", expiresIn: "never" };
 
 export function TokensPage() {
   const [tokens, setTokens] = useState<ApiToken[] | null>(null);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -81,6 +157,11 @@ export function TokensPage() {
   }
 
   useEffect(refresh, []);
+  // For the "restrict to these projects" picker — this admin-only page
+  // always has an unrestricted session, so this always returns every project.
+  useEffect(() => {
+    api.listProjects().then(setProjects).catch(() => setProjects([]));
+  }, []);
 
   async function handleCreate() {
     if (!form.name.trim()) return;
@@ -165,7 +246,16 @@ export function TokensPage() {
                 <Label htmlFor="token-scope">Scope</Label>
                 <Select
                   value={form.scope}
-                  onValueChange={(v) => setForm({ ...form, scope: v as TokenScope })}
+                  onValueChange={(v) =>
+                    setForm({
+                      ...form,
+                      scope: v as TokenScope,
+                      // Admin stays global — clear any in-progress
+                      // restriction rather than send a request the server
+                      // will reject.
+                      projects: v === "admin" ? undefined : form.projects,
+                    })
+                  }
                 >
                   <SelectTrigger id="token-scope" className="w-full">
                     <SelectValue />
@@ -178,6 +268,19 @@ export function TokensPage() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="token-projects">Projects</Label>
+                <ProjectsMultiSelect
+                  projects={projects}
+                  selected={form.projects ?? null}
+                  onChange={(slugs) => setForm({ ...form, projects: slugs ?? undefined })}
+                  disabled={form.scope === "admin"}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Leave as "All projects" unless this token is for something (e.g. an untrusted
+                  agent) that should only ever reach specific projects.
+                </p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="token-expiry">Expires</Label>

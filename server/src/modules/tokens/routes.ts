@@ -3,7 +3,7 @@ import { deleteCookie, setCookie } from "hono/cookie";
 import { Hono } from "hono";
 import type { Bindings } from "../../lib/bindings";
 import { requireApiAuth, resolveToken, SESSION_COOKIE_NAME } from "./middleware";
-import { createTokenSchema, loginSchema } from "./schema";
+import { createTokenSchema, loginSchema, type TokenRow } from "./schema";
 import { TokensService } from "./service";
 
 // Chrome's own cap on Set-Cookie Max-Age — used as the session lifetime for
@@ -58,19 +58,24 @@ authRoutes.get("/me", requireApiAuth({ minScope: "read_only" }), async (c) => {
 // Mounted at /api/tokens, gated admin-only by requireApiAuth in index.ts.
 export const tokenManagementRoutes = new Hono<AppEnv>();
 
+// TokenRow stores `projects` as a JSON-encoded string (or null); the API
+// shape is the parsed array (or null) instead, matching CreateTokenInput.
+function serializeTokenRow({ tokenHash: _tokenHash, projects, ...row }: TokenRow) {
+  return { ...row, projects: projects ? (JSON.parse(projects) as string[]) : null };
+}
+
 tokenManagementRoutes.get("/", async (c) => {
   const tokens = new TokensService(c.env);
   const rows = await tokens.list();
-  return c.json(rows.map(({ tokenHash: _tokenHash, ...row }) => row));
+  return c.json(rows.map(serializeTokenRow));
 });
 
 tokenManagementRoutes.post("/", zValidator("json", createTokenSchema), async (c) => {
   const tokens = new TokensService(c.env);
   const { token, row } = await tokens.create(c.req.valid("json"));
-  const { tokenHash: _tokenHash, ...meta } = row;
   // The raw token is shown exactly once, in this response — it can never be
   // retrieved again afterward, only revoked and replaced with a new one.
-  return c.json({ token, ...meta }, 201);
+  return c.json({ token, ...serializeTokenRow(row) }, 201);
 });
 
 tokenManagementRoutes.delete("/:id", async (c) => {

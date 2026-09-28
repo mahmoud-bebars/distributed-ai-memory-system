@@ -1,17 +1,27 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import type { Bindings } from "../../lib/bindings";
+import { canAccessProject, type TokenAuth } from "../tokens";
 import { appendMemorySchema, createProjectSchema, updateProjectSchema } from "./schema";
 import { ProjectsService } from "./service";
 
-export const projectsRoutes = new Hono<{ Bindings: Bindings }>();
+export const projectsRoutes = new Hono<{ Bindings: Bindings; Variables: { tokenAuth: TokenAuth } }>();
 
+// The only two routes on this collection root, not covered by index.ts's
+// /api/projects/:slug/* guard (which needs a slug to check) — list is
+// filtered to what this token can see, create is refused outright for a
+// restricted token rather than silently scoping the new project to it.
 projectsRoutes.get("/", async (c) => {
+  const auth = c.get("tokenAuth");
   const service = new ProjectsService(c.env);
-  return c.json(await service.list());
+  const all = await service.list();
+  return c.json(all.filter((project) => canAccessProject(auth, project.slug)));
 });
 
 projectsRoutes.post("/", zValidator("json", createProjectSchema), async (c) => {
+  if (c.get("tokenAuth").projects !== null) {
+    return c.json({ error: "A project-restricted token cannot create projects" }, 403);
+  }
   const service = new ProjectsService(c.env);
   try {
     const project = await service.create(c.req.valid("json"));

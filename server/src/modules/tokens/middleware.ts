@@ -30,9 +30,18 @@ async function matchesAdminToken(raw: string, env: Bindings): Promise<boolean> {
  *  exists). */
 export async function resolveToken(raw: string, env: Bindings): Promise<TokenAuth | null> {
   if (await matchesAdminToken(raw, env)) {
-    return { id: null, name: "admin-bootstrap", scope: "admin" };
+    return { id: null, name: "admin-bootstrap", scope: "admin", projects: null };
   }
   return new TokensService(env).verify(raw);
+}
+
+/** The one place a project allow-list is checked. `null` on the auth means
+ *  unrestricted (today's default behavior); otherwise the slug must appear
+ *  in the list verbatim. Callers that deny access on `false` must do so
+ *  with a 404 (REST) or an "Unknown project" tool error (MCP) — never a 403
+ *  — so a restricted credential can't learn which other projects exist. */
+export function canAccessProject(auth: TokenAuth, slug: string): boolean {
+  return auth.projects === null || auth.projects.includes(slug);
 }
 
 /** Resolves whatever credential a request carries (bearer header takes

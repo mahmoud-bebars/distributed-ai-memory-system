@@ -57,6 +57,11 @@ export function GuidePage() {
             <code className="text-xs">read_only</code> for a client that should never mutate
             anything) and copy it — it's shown exactly once.
           </p>
+          <p className="text-sm text-muted-foreground">
+            For an internet-facing or otherwise untrusted agent, restrict the token to specific
+            projects in the picker — it will only ever see or act on those, and every other
+            project 404s as if it didn't exist.
+          </p>
         </CardContent>
       </Card>
 

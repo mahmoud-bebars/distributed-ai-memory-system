@@ -1,14 +1,15 @@
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import type { Bindings } from "../../lib/bindings";
-import type { TokenScope } from "../tokens";
+import type { TokenAuth } from "../tokens";
 import { buildMemoryMcpServer } from "./service";
 
 /**
  * The `/mcp` endpoint's HTTP entry point, mounted in index.ts behind
  * `requireApiAuth({ minScope: "read_only" })` — by the time a request lands
- * here it's already been authenticated and its scope resolved; this
- * function never does its own auth, it just speaks MCP for that scope (see
- * service.ts's buildMemoryMcpServer for what the scope actually gates).
+ * here it's already been authenticated and its identity resolved; this
+ * function never does its own auth, it just speaks MCP for that identity
+ * (see service.ts's buildMemoryMcpServer for what scope and the project
+ * allow-list each gate).
  *
  * Stateless by design: under the MCP 2026-07-28 spec the session handshake
  * (Mcp-Session-Id) was removed, so there's no session to keep a long-lived
@@ -21,9 +22,9 @@ import { buildMemoryMcpServer } from "./service";
 export async function handleMcpRequest(
   request: Request,
   env: Bindings,
-  scope: TokenScope,
+  auth: TokenAuth,
 ): Promise<Response> {
-  const server = buildMemoryMcpServer(env, scope);
+  const server = buildMemoryMcpServer(env, auth);
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
   });

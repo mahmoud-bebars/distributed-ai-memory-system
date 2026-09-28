@@ -95,6 +95,19 @@ page. Every route is gated in code now (`requireApiAuth`, applied in
 whatever sits in front of the domain. See CLAUDE.md's "MCP + token auth
 conventions" for the mechanism.
 
+**Tokens gained an optional per-project allow-list, same day.** Every
+token before this was global — any `read_write` token could reach every
+project. That became a real problem once an internet-facing agent (a
+"studio" triage Worker processing untrusted submissions) needed a token of
+its own: a leak or a bug there shouldn't be able to touch unrelated
+projects. A token can now be created with a `projects` allow-list (`null`
+still means "all projects", the default and the only option for `admin`
+scope); `canAccessProject` is the one check every enforcement point calls,
+and a disallowed slug **always 404s, never 403s**, so a restricted or
+leaked token can't even learn what else this server holds. See CLAUDE.md's
+"Per-token project allow-list" for the full mechanism (REST middleware,
+MCP's `buildMemoryMcpServer(env, auth)`, and why chat needed no changes).
+
 **Cloudflare Access is still on** for the deployment domain, as an
 *additional* edge-level layer — the Worker no longer depends on it for
 correctness, but it hasn't been removed. This deployment runs single-domain

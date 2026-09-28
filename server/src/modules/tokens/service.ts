@@ -47,6 +47,7 @@ export class TokensService {
       tokenHash: await hashToken(raw),
       scope: input.scope,
       expiresAt: computeExpiresAt(input.expiresIn),
+      projects: input.projects ? JSON.stringify(input.projects) : null,
     };
     await this.db.insert(apiTokens).values(row);
     return { token: raw, row: (await this.getById(row.id))! };
@@ -84,7 +85,12 @@ export class TokensService {
     const row = await this.getByHash(await hashToken(raw));
     if (!row || row.revokedAt !== null) return null;
     if (row.expiresAt !== null && new Date(row.expiresAt).getTime() <= Date.now()) return null;
-    return { id: row.id, name: row.name, scope: row.scope as TokenScope };
+    return {
+      id: row.id,
+      name: row.name,
+      scope: row.scope as TokenScope,
+      projects: row.projects ? (JSON.parse(row.projects) as string[]) : null,
+    };
   }
 
   private async getByHash(tokenHash: string): Promise<TokenRow | null> {

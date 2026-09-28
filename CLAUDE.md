@@ -89,8 +89,51 @@ reconstructs a real one from the template at CI build time; see
     `/mcp`, since every MCP request is a POST and can't be split by
     method the way REST routes are).
   - Three scopes, ranked `read_only < read_write < admin` — see
-    `SCOPE_RANK` in `middleware.ts`. There is no per-project scoping;
-    a token's scope applies across every project.
+    `SCOPE_RANK` in `middleware.ts`. Scope and project access are
+    orthogonal: scope gates *what kind* of thing a token can do
+    (read vs. write vs. manage tokens), the optional allow-list below
+    gates *which projects* it can do it to.
+  - **Per-token project allow-list.** `TokenAuth.projects` (`schema.ts`) is
+    `string[] | null` — `null` (every token before 2026-09-28, and the
+    default today) means all projects, exactly like before. A non-null
+    array is the exhaustive set of project slugs a token may see or act
+    on, stored as a JSON-encoded string in `api_tokens.projects`
+    (migration `0005_token_projects.sql`) and parsed back on `verify()`.
+    `createTokenSchema` accepts an optional `projects` array (at least one
+    slug, deduped, capped at 50) and refuses it outright for an
+    `admin`-scope token (400) — admin always stays global, since
+    restricting the scope that manages tokens/projects themselves would be
+    a false sense of containment. Tokens are immutable: there's no edit
+    endpoint, changing a token's projects means revoke-and-recreate.
+    `canAccessProject(auth, slug)` (`middleware.ts`, exported from the
+    module) is the one function every enforcement point calls — never
+    hand-roll the `projects === null || projects.includes(slug)` check
+    elsewhere. **A denial is always a 404 (REST) or the same "Unknown
+    project" tool error (MCP), never a 403** — the whole point is that a
+    restricted/leaked token can't learn which other projects exist.
+    - REST: `server/src/index.ts` mounts one middleware on
+      `/api/projects/:slug/*` (verified against Hono's own router: this
+      pattern matches the bare `/api/projects/:slug` too, not just deeper
+      paths) that 404s a disallowed slug before projects/chat/docs/shares
+      routes ever see the request. The two collection-root routes have no
+      slug to check there, so they're handled individually in
+      `projects/routes.ts`: `GET /api/projects` filters the list to
+      allowed slugs, `POST /api/projects` (create) 403s outright for a
+      restricted token — a genuinely different rule (filter vs. forbid),
+      not a 404, since there's no existing project to hide the existence
+      of.
+    - MCP: `buildMemoryMcpServer(env, auth)` takes the full `TokenAuth`,
+      not just scope. `list_projects` filters its results the same way as
+      the REST list route; every other tool that takes a `slug` checks
+      `canAccessProject` first and returns the exact same
+      `Unknown project: {slug}` error text a real missing slug produces
+      elsewhere in the codebase, so the two cases are indistinguishable
+      from the outside.
+    - Chat's tool-driven retrieval loop (`modules/chat`) needed no changes
+      here — its `search_memory`/`list_docs`/`search_docs`/`read_doc` tool
+      input schemas never include a `slug` field for the model to control;
+      every executor closes over the one slug the route was called with,
+      which is already covered by the REST guard above.
 - Browser sessions and bearer use share one code path, not two. A login
   (`POST /api/auth/login`) doesn't create a server-side session — it just
   sets an httpOnly cookie **whose value is the raw token itself**. Revoking
@@ -110,8 +153,10 @@ reconstructs a real one from the template at CI build time; see
   (`sessionIdGenerator: undefined`). No Durable Object / `McpAgent` — a
   single-user server doesn't need one. Don't reintroduce DO state unless a
   feature genuinely requires cross-request session memory.
-- `buildMemoryMcpServer(env, scope)` (`server/src/modules/mcp/service.ts`)
-  takes the resolved scope and only *registers* the mutating tools
+- `buildMemoryMcpServer(env, auth)` (`server/src/modules/mcp/service.ts`)
+  takes the full resolved `TokenAuth` (not just scope, since 2026-09-28's
+  per-token project allow-list — see above) and only *registers* the
+  mutating tools
   (`append_memory`, `update_entity`, `append_doc`, `update_doc`,
   `delete_doc`) when it's `read_write`/`admin` — a `read_only` token's
   `tools/list` never even lists them. This is the one place scope

@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { CfWorkerJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/cfworker";
 import type { Bindings } from "../../lib/bindings";
-import type { TokenScope } from "../tokens";
+import { canAccessProject, type TokenAuth } from "../tokens";
 import { ChatService } from "../chat";
 import { DocsService } from "../docs";
 import { ProjectsService } from "../projects";
@@ -38,6 +38,13 @@ const errorResult = (message: string) => ({
   isError: true,
 });
 
+// Same message a genuinely-missing slug already produces (ProjectsService's
+// "Unknown project: X" thrown by append/update/doc operations) — returned
+// here too for a slug that exists but is outside the token's allow-list, so
+// a restricted credential can never distinguish "doesn't exist" from "not
+// yours to see." Never a different message, never a different shape.
+const unknownProjectError = (slug: string) => errorResult(`Unknown project: ${slug}`);
+
 /**
  * Builds a fresh `McpServer` exposing the project's memory as MCP tools.
  *
@@ -52,20 +59,25 @@ const errorResult = (message: string) => ({
  * back to its Ajv default, which compiles schemas via `new Function` — banned
  * on the Workers runtime.
  *
- * `scope` comes from the bearer token/session that authenticated this
- * request (see modules/tokens/middleware.ts) and gates which tools get
+ * `auth` is the full identity that authenticated this request (see
+ * modules/tokens/middleware.ts) — both its scope and its project
+ * allow-list gate what happens here. Scope gates which tools get
  * registered at all: a `read_only` token never even sees the mutating
  * tools (append_memory, update_entity, append_doc, update_doc, delete_doc)
- * in its tool list, let alone gets to call them. This is the one place
- * scope enforcement happens below the top-level auth check, since every
- * /mcp request is a POST and can't be split by HTTP method the way REST
- * routes are.
+ * in its tool list, let alone gets to call them. The allow-list is checked
+ * inside every tool that takes a `slug`, via canAccessProject — a
+ * restricted token gets the same "Unknown project" error for a
+ * disallowed-but-real slug as it would for one that never existed, so it
+ * can never learn what else this server holds. This is the one place
+ * either check happens below the top-level auth check, since every /mcp
+ * request is a POST and can't be split by HTTP method the way REST routes
+ * are.
  */
-export function buildMemoryMcpServer(env: Bindings, scope: TokenScope): McpServer {
+export function buildMemoryMcpServer(env: Bindings, auth: TokenAuth): McpServer {
   const projects = new ProjectsService(env);
   const chat = new ChatService(env);
   const docs = new DocsService(env);
-  const canWrite = scope === "read_write" || scope === "admin";
+  const canWrite = auth.scope === "read_write" || auth.scope === "admin";
 
   const server = new McpServer(SERVER_INFO, {
     jsonSchemaValidator: new CfWorkerJsonSchemaValidator(),
@@ -78,7 +90,10 @@ export function buildMemoryMcpServer(env: Bindings, scope: TokenScope): McpServe
         "List all memory projects (slug, title, summary, tags, entry counts). Takes no arguments.",
       inputSchema: {},
     },
-    async () => jsonResult(await projects.list()),
+    async () => {
+      const all = await projects.list();
+      return jsonResult(all.filter((project) => canAccessProject(auth, project.slug)));
+    },
   );
 
   server.registerTool(
@@ -88,7 +103,10 @@ export function buildMemoryMcpServer(env: Bindings, scope: TokenScope): McpServe
         "Read the full memory log for a project. Returns every entry (entity/relation/observation) as parsed JSON objects.",
       inputSchema: readMemoryInput,
     },
-    async ({ slug }) => jsonResult(await projects.readMemory(slug)),
+    async ({ slug }) => {
+      if (!canAccessProject(auth, slug)) return unknownProjectError(slug);
+      return jsonResult(await projects.readMemory(slug));
+    },
   );
 
   if (canWrite) {
@@ -100,6 +118,7 @@ export function buildMemoryMcpServer(env: Bindings, scope: TokenScope): McpServe
         inputSchema: appendMemoryInput,
       },
       async ({ slug, entry }) => {
+        if (!canAccessProject(auth, slug)) return unknownProjectError(slug);
         try {
           await projects.appendMemory(slug, entry);
           return jsonResult({ ok: true });
@@ -117,6 +136,7 @@ export function buildMemoryMcpServer(env: Bindings, scope: TokenScope): McpServe
         inputSchema: updateEntityInput,
       },
       async ({ slug, name, category, fields }) => {
+        if (!canAccessProject(auth, slug)) return unknownProjectError(slug);
         try {
           const updates = { ...(fields ?? {}), ...(category !== undefined ? { category } : {}) };
           const entry = await projects.updateEntity(slug, name, updates);
@@ -135,6 +155,7 @@ export function buildMemoryMcpServer(env: Bindings, scope: TokenScope): McpServe
         inputSchema: appendDocInput,
       },
       async ({ slug, filename, content }) => {
+        if (!canAccessProject(auth, slug)) return unknownProjectError(slug);
         try {
           await docs.append(slug, filename, content);
           return jsonResult({ ok: true });
@@ -152,6 +173,7 @@ export function buildMemoryMcpServer(env: Bindings, scope: TokenScope): McpServe
         inputSchema: updateDocInput,
       },
       async ({ slug, filename, content }) => {
+        if (!canAccessProject(auth, slug)) return unknownProjectError(slug);
         try {
           await docs.update(slug, filename, content);
           return jsonResult({ ok: true });
@@ -168,6 +190,7 @@ export function buildMemoryMcpServer(env: Bindings, scope: TokenScope): McpServe
         inputSchema: deleteDocInput,
       },
       async ({ slug, filename }) => {
+        if (!canAccessProject(auth, slug)) return unknownProjectError(slug);
         try {
           await docs.delete(slug, filename);
           return jsonResult({ ok: true });
@@ -186,6 +209,7 @@ export function buildMemoryMcpServer(env: Bindings, scope: TokenScope): McpServe
       inputSchema: askMemoryInput,
     },
     async ({ slug, question }) => {
+      if (!canAccessProject(auth, slug)) return unknownProjectError(slug);
       try {
         const { answer } = await chat.askOnce(slug, question);
         return jsonResult({ answer });

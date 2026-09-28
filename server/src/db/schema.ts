@@ -57,6 +57,11 @@ export const apiTokens = sqliteTable("api_tokens", {
   name: text("name").notNull(),
   tokenHash: text("token_hash").notNull(),
   scope: text("scope").notNull(), // "admin" | "read_write" | "read_only"
+  // Null means "all projects" (today's behavior). Otherwise a JSON-encoded
+  // array of project slugs this token is restricted to — enforced by
+  // canAccessProject (modules/tokens) everywhere a project is looked up by
+  // slug. Admin-scope tokens are never restricted; see createTokenSchema.
+  projects: text("projects"),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(datetime('now'))`),

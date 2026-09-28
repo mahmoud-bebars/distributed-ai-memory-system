@@ -105,6 +105,9 @@ export interface ApiToken {
   id: string;
   name: string;
   scope: TokenScope;
+  // Null means "all projects" (today's default). Otherwise the exhaustive
+  // list of project slugs this token may see or act on.
+  projects: string[] | null;
   createdAt: string;
   expiresAt: string | null;
   lastUsedAt: string | null;
@@ -115,6 +118,9 @@ export interface CreateTokenInput {
   name: string;
   scope: TokenScope;
   expiresIn: ExpirationOption;
+  // Omit entirely for an unrestricted (all-projects) token. The server
+  // rejects this alongside scope "admin" — admin tokens stay global.
+  projects?: string[];
 }
 
 /** Reads an SSE response body (from hono/streaming's streamSSE) and invokes
