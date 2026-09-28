@@ -5,3 +5,7 @@ ANTHROPIC_API_KEY="sk-ant-..."
 # src/modules/tokens) — any string works locally. Log into the dev UI with
 # it once to create your first real token.
 DAMS_ADMIN_TOKEN="dev-admin-token"
+# Overrides wrangler.toml's [vars] ENVIRONMENT="production" for local dev —
+# keeps the login cookie's Secure attribute off, since browsers reject
+# Secure cookies over plain http and `wrangler dev` isn't served over https.
+ENVIRONMENT="development"

@@ -29,7 +29,11 @@ binding = "ASSETS"
 not_found_handling = "single-page-application"
 
 [vars]
-ENVIRONMENT = "development"
+# Gates the session cookie's Secure attribute (modules/tokens/routes.ts) —
+# keep this "production" in the deployed config; local `wrangler dev`
+# overrides it back to "development" via .dev.vars (which takes precedence
+# over [vars]), since browsers reject Secure cookies over plain http.
+ENVIRONMENT = "production"
 # Optional. Set this only if you want a second hostname (e.g. share.example.com,
 # uncommented in `routes` above) left outside whatever access control you put
 # in front of memory.example.com, so share-link recipients and /mcp clients
