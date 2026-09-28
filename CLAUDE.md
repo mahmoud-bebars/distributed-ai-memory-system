@@ -9,6 +9,11 @@ as static assets). Run `npm install` once from the repo root. Root-level
 `npm run <script>` commands delegate to the right workspace — see
 "Commands" below. `wrangler.toml` and its CLI (`wrangler d1 ...`,
 `wrangler secret put ...`) live in and must run from `server/`.
+`wrangler.toml` is git-ignored on purpose (only `wrangler.toml.example` is
+tracked) so a fork of this repo can't accidentally deploy onto the
+original account's D1 database or domain — `server/scripts/render-wrangler-toml.sh`
+reconstructs a real one from the template at CI build time; see
+`docs/DEPLOY.md`'s "Continuous deployment" section.
 
 ## Hard preferences (non-negotiable, apply repo-wide)
 
