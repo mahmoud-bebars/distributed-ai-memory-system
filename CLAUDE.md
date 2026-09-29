@@ -13,7 +13,10 @@ as static assets). Run `npm install` once from the repo root. Root-level
 tracked) so a fork of this repo can't accidentally deploy onto the
 original account's D1 database or domain — `server/scripts/render-wrangler-toml.sh`
 reconstructs a real one from the template at CI build time; see
-`docs/DEPLOY.md`'s "Continuous deployment" section.
+`docs/DEPLOY.md`'s "Continuous deployment" section. The template's
+`[ai]`/`[[vectorize]]` bindings sit between `# >>> semantic-search` /
+`# <<< semantic-search` markers so CI can strip them
+(`WRANGLER_DISABLE_SEMANTIC_SEARCH=1`) — keep the markers when editing it.
 
 ## Hard preferences (non-negotiable, apply repo-wide)
 

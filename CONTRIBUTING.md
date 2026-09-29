@@ -36,8 +36,9 @@ kept up to date as the source of truth; this file won't duplicate it.
 
 See [docs/](docs/) for architecture and design background:
 [docs/PROJECT_UNDERSTANDING.md](docs/PROJECT_UNDERSTANDING.md) for the
-overall goal and shape, [docs/DESIGN.md](docs/DESIGN.md) for the frontend's
-visual system.
+overall goal, shape and roadmap, [docs/DEPLOY.md](docs/DEPLOY.md) for
+deploying, [docs/DESIGN.md](docs/DESIGN.md) for the frontend's visual
+system.
 
 ## Local setup
 
@@ -45,7 +46,7 @@ This is an npm workspaces monorepo (`client/` + `server/`) with one root
 `package.json` — a single `npm install` at the repo root installs both.
 
 ```
-cp server/wrangler.toml.example server/wrangler.toml   # fill in your own D1/KV ids — see docs/DEPLOY.md
+cp server/wrangler.toml.example server/wrangler.toml   # git-ignored; then delete the "semantic-search" block (Vectorize/Workers AI don't run locally)
 cp server/.dev.vars.example server/.dev.vars            # local secrets for `wrangler dev`
 npm install
 npm run db:migrate:local

@@ -1,15 +1,13 @@
 # Documentation
 
-- [PROJECT_UNDERSTANDING.md](PROJECT_UNDERSTANDING.md) — the goal, the
-  architecture, and current status.
-- [DEPLOY.md](DEPLOY.md) — first deploy, from a clean checkout.
-- [DESIGN.md](DESIGN.md) — the web UI's visual system (`client/`).
-- [GITHUB.md](GITHUB.md) — getting the repo onto GitHub.
-- [WIRE_CLAUDE_CODE.md](WIRE_CLAUDE_CODE.md) — connecting Claude Code to a
-  deployed instance over `/mcp`.
-- [CLAUDE_CODE_TASK.md](CLAUDE_CODE_TASK.md) — the original task brief for
-  the MCP server + OAuth layer, kept as a historical record of the
-  constraints that shaped that work.
+| Doc | What's in it |
+|---|---|
+| [../README.md](../README.md) | Start here: what it is, features, quick start, reference |
+| [DEPLOY.md](DEPLOY.md) | Deploying, CI (Workers Builds), configuration, free-plan limits, troubleshooting |
+| [PROJECT_UNDERSTANDING.md](PROJECT_UNDERSTANDING.md) | The goal, architecture decisions, the assistant's design and safety model, roadmap |
+| [WIRE_CLAUDE_CODE.md](WIRE_CLAUDE_CODE.md) | Connecting Claude Code and other MCP clients to your instance |
+| [DESIGN.md](DESIGN.md) | The web UI's visual system (`client/`) |
 
-Project- and repo-wide conventions Claude Code should follow live in
-[CLAUDE.md](../CLAUDE.md) at the repo root, not here.
+Conventions for anyone (or any agent) changing the code live in
+[CLAUDE.md](../CLAUDE.md) at the repo root; contribution rules in
+[CONTRIBUTING.md](../CONTRIBUTING.md).

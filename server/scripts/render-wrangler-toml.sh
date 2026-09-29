@@ -13,6 +13,11 @@
 # secrets — neither of these is sensitive on its own):
 #   WRANGLER_D1_DATABASE_ID   e.g. `wrangler d1 info dams_db` locally
 #   WRANGLER_CUSTOM_DOMAIN    e.g. memory.example.com
+# Optional:
+#   WRANGLER_DISABLE_SEMANTIC_SEARCH=1
+#       Drops the [ai] + [[vectorize]] bindings (the block marked
+#       "semantic-search" in the template) so a deploy doesn't need a
+#       Vectorize index. Search then runs keyword-only.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -23,5 +28,12 @@ sed \
   -e "s/<YOUR_D1_DATABASE_ID>/${WRANGLER_D1_DATABASE_ID}/" \
   -e "s/memory\.example\.com/${WRANGLER_CUSTOM_DOMAIN}/" \
   wrangler.toml.example > wrangler.toml
+
+if [ "${WRANGLER_DISABLE_SEMANTIC_SEARCH:-}" = "1" ]; then
+  # Delete everything between (and including) the two marker comments.
+  sed -i.bak -e '/# >>> semantic-search/,/# <<< semantic-search/d' wrangler.toml
+  rm -f wrangler.toml.bak
+  echo "Semantic search disabled: removed [ai] and [[vectorize]] bindings"
+fi
 
 echo "Wrote server/wrangler.toml for ${WRANGLER_CUSTOM_DOMAIN}"

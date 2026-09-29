@@ -21,24 +21,30 @@ binding = "DAMS_BUCKET"
 bucket_name = "dmas"
 
 # --- Optional: hybrid semantic + keyword search --------------------------
-# Everything from here to the [assets] block is optional. The app runs fine
-# without it: search falls back to keyword-only (D1 FTS5) and nothing that
-# writes memory ever depends on these. To use it, create the Vectorize index
-# once (bge-m3 is 1024-dimensional — the dimensions must match), then deploy:
+# The semantic half (Workers AI embeddings + Vectorize) is optional. Without
+# it, search falls back to keyword-only (D1 FTS5) and nothing that writes
+# memory ever depends on it. To use it, create the Vectorize index once
+# (bge-m3 is 1024-dimensional — the dimensions must match), then deploy:
 #
 #   wrangler vectorize create dams-memory --dimensions=1024 --metric=cosine
 #   wrangler vectorize create-metadata-index dams-memory --property-name=projectSlug --type=string
 #
-# If you don't want any of it, delete the four blocks below — `wrangler
-# deploy` fails if a [[vectorize]] binding points at an index that doesn't
-# exist yet. Workers Free plan is enough (see README's free-tier notes).
+# `wrangler deploy` fails if a [[vectorize]] binding points at an index that
+# doesn't exist yet. To go keyword-only, delete the marked block below — or,
+# in CI, set WRANGLER_DISABLE_SEMANTIC_SEARCH=1 and
+# server/scripts/render-wrangler-toml.sh strips it for you. Workers Free
+# plan is enough (see README's free-plan notes).
+# >>> semantic-search
 [ai]
 binding = "AI"
 
 [[vectorize]]
 binding = "VECTORIZE"
 index_name = "dams-memory"
+# <<< semantic-search
 
+# Workflows need no external resources, so they stay even when
+# semantic search is disabled (they fall back to inline execution if unbound).
 [[workflows]]
 name = "dams-search-backfill"
 binding = "SEARCH_WORKFLOW"
