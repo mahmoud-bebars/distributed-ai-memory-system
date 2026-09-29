@@ -5,6 +5,11 @@ export interface Project {
   tags: string;
   r2Key: string;
   entityCount: number;
+  // Privacy flag: false keeps the project out of cross-project search (and
+  // the global assistant) unless a request names it explicitly.
+  includeInGlobalSearch: boolean;
+  // Soft archive — hidden from default cross-project search, never deleted.
+  archived: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -60,6 +65,88 @@ export interface ChatStreamHandlers {
   onProposedAction: (action: ProposedAction) => void;
   onError: (message: string) => void;
   onDone: () => void;
+}
+
+// Action plans (propose → approve → execute). Mirrors
+// server/src/modules/actions/schema.ts; duplicated for the same reason as
+// ChatSource above.
+export type PlanAction =
+  | { type: "create_project"; slug: string; title: string; summary?: string; tags: string[]; includeInGlobalSearch: boolean }
+  | { type: "update_project"; slug: string; title?: string; summary?: string; tags?: string[]; includeInGlobalSearch?: boolean; archived?: boolean }
+  | { type: "archive_project"; slug: string }
+  | { type: "tag_entries"; slug: string; entryIds: string[]; tags: string[] }
+  | { type: "move_entries"; sourceSlug: string; targetSlug: string; entryIds: string[] }
+  | { type: "write_synthesis"; slug: string; title: string; content: string; sources: { slug: string; entryId: string }[] };
+
+export type PlanStatus = "pending" | "running" | "done" | "failed" | "rejected";
+
+export interface StoredPlanAction {
+  id: string;
+  seq: number;
+  type: PlanAction["type"];
+  payload: PlanAction;
+  status: "pending" | "done" | "failed";
+  result: unknown;
+  inverse: unknown;
+  error: string | null;
+}
+
+export interface StoredPlan {
+  id: string;
+  status: PlanStatus;
+  summary: string;
+  rationale: string;
+  citations: { slug: string; entryId: string }[];
+  source: "api" | "mcp" | "agent";
+  proposedBy: string;
+  approvedBy: string | null;
+  error: string | null;
+  createdAt: string;
+  approvedAt: string | null;
+  finishedAt: string | null;
+  actions: StoredPlanAction[];
+}
+
+// Global assistant (server/src/modules/assistant). Mirrors its schema.ts.
+export interface AssistantCitation {
+  slug: string;
+  entryId: string;
+  project: string; // project title
+  snippet: string;
+}
+
+export type AssistantEvent =
+  | { type: "conversation"; id: string }
+  | { type: "task"; id: string }
+  | { type: "status"; label: string }
+  | { type: "answer"; text: string; citations: AssistantCitation[] }
+  | { type: "plan"; planId: string; summary: string }
+  | { type: "ask"; question: string }
+  | { type: "error"; message: string }
+  | { type: "done" };
+
+export type TaskStatus = "planning" | "awaiting_approval" | "running" | "done" | "failed" | "cancelled" | "expired";
+
+export interface AssistantTask {
+  id: string;
+  conversationId: string;
+  title: string;
+  goal: string;
+  status: TaskStatus;
+  planId: string | null;
+  currentStep: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AssistantMessage {
+  id: string;
+  role: "user" | "assistant";
+  kind: "text" | "answer" | "ask" | "plan";
+  content: string;
+  citations: AssistantCitation[];
+  planId: string | null;
+  createdAt: string;
 }
 
 export type ExpirationOption = "1d" | "7d" | "30d" | "90d" | "never";
@@ -264,7 +351,10 @@ export const api = {
     }),
   /** Title/summary/tags are editable after creation — the slug alone is
    *  permanent (it's how MCP tools address the project). */
-  updateProject: (slug: string, input: { title: string; summary: string; tags: string[] }) =>
+  updateProject: (
+    slug: string,
+    input: { title: string; summary: string; tags: string[]; includeInGlobalSearch?: boolean },
+  ) =>
     request<Project>(`/projects/${slug}`, {
       method: "PATCH",
       body: JSON.stringify(input),
@@ -369,6 +459,72 @@ export const api = {
    *  an unexpected failure. */
   me: () => request<AuthIdentity>("/auth/me"),
   listTokens: () => request<ApiToken[]>("/tokens"),
+  listPlans: () => request<StoredPlan[]>("/plans"),
+  getPlan: (id: string) => request<StoredPlan>(`/plans/${id}`),
+  resumePlan: (id: string) => request<StoredPlan>(`/plans/${id}/resume`, { method: "POST" }),
+  listConversations: () => request<{ id: string; title: string; updatedAt: string }[]>("/assistant/conversations"),
+  getConversation: (id: string) => request<AssistantMessage[]>(`/assistant/conversations/${id}`),
+  listTasks: () => request<{ active: AssistantTask[]; recent: AssistantTask[] }>("/assistant/tasks"),
+  cancelTask: (id: string) => request<AssistantTask>(`/assistant/tasks/${id}/cancel`, { method: "POST" }),
+  resumeTask: (id: string) => request<AssistantTask>(`/assistant/tasks/${id}/resume`, { method: "POST" }),
+  /** One assistant turn as an SSE stream of AssistantEvents. Resolves when
+   *  the stream ends; failures come through `onEvent` as an `error` event. */
+  streamAssistant: async (
+    message: string,
+    conversationId: string | undefined,
+    onEvent: (event: AssistantEvent) => void,
+    signal?: AbortSignal,
+  ): Promise<void> => {
+    try {
+      const response = await fetch("/api/assistant/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ message, conversationId }),
+        signal,
+      });
+      if (!response.ok || !response.body) {
+        let detail = String(response.status);
+        try {
+          const body = (await response.json()) as { error?: unknown };
+          if (typeof body.error === "string") detail = body.error;
+        } catch {
+          // keep the status code
+        }
+        onEvent({ type: "error", message: detail });
+        return;
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let end = buffer.indexOf("\n\n");
+        while (end !== -1) {
+          const frame = buffer.slice(0, end);
+          buffer = buffer.slice(end + 2);
+          const line = frame.split("\n").find((l) => l.startsWith("data:"));
+          if (line) {
+            try {
+              onEvent(JSON.parse(line.slice(5).trim()) as AssistantEvent);
+            } catch {
+              // malformed frame — skip it
+            }
+          }
+          end = buffer.indexOf("\n\n");
+        }
+      }
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      onEvent({ type: "error", message: err instanceof Error ? err.message : "Connection lost" });
+    }
+  },
+  /** `confirmations` maps each create_project action id to the slug the
+   *  human typed — the server refuses to approve without them. */
+  approvePlan: (id: string, confirmations: Record<string, string>) =>
+    request<StoredPlan>(`/plans/${id}/approve`, { method: "POST", body: JSON.stringify({ confirmations }) }),
+  rejectPlan: (id: string) => request<StoredPlan>(`/plans/${id}/reject`, { method: "POST" }),
   createToken: (input: CreateTokenInput) =>
     request<ApiToken & { token: string }>("/tokens", { method: "POST", body: JSON.stringify(input) }),
   revokeToken: (id: string) => request<{ ok: true }>(`/tokens/${id}`, { method: "DELETE" }),

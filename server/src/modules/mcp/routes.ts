@@ -23,8 +23,9 @@ export async function handleMcpRequest(
   request: Request,
   env: Bindings,
   auth: TokenAuth,
+  ctx?: { waitUntil(promise: Promise<unknown>): void },
 ): Promise<Response> {
-  const server = buildMemoryMcpServer(env, auth);
+  const server = buildMemoryMcpServer(env, auth, ctx);
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
   });

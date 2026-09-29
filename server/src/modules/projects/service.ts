@@ -2,6 +2,7 @@ import { desc, eq, sql } from "drizzle-orm";
 import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
 import { projects, type ProjectRow } from "../../db/schema";
 import type { Bindings } from "../../lib/bindings";
+import { indexEntries } from "../search/indexer";
 import type { CreateProjectInput, MemoryEntry } from "./schema";
 
 const r2KeyFor = (slug: string) => `${slug}/memory.jsonl`;
@@ -24,7 +25,13 @@ export function currentEntities(entries: MemoryEntry[]): MemoryEntry[] {
 export class ProjectsService {
   private readonly db: DrizzleD1Database;
 
-  constructor(private readonly env: Bindings) {
+  // `ctx` is optional: with it, search indexing after an append runs in
+  // waitUntil (off the response path); without it (e.g. inside a Workflow
+  // step) indexing is awaited inline. Either way it can't fail the append.
+  constructor(
+    private readonly env: Bindings,
+    private readonly ctx?: { waitUntil(promise: Promise<unknown>): void },
+  ) {
     this.db = drizzle(env.DAMS_DB);
   }
 
@@ -56,6 +63,7 @@ export class ProjectsService {
       title: input.title,
       summary: input.summary ?? null,
       tags: JSON.stringify(input.tags),
+      includeInGlobalSearch: input.includeInGlobalSearch,
       r2Key,
     });
 
@@ -69,7 +77,13 @@ export class ProjectsService {
    *  doesn't exist. */
   async update(
     slug: string,
-    input: { title: string; summary: string | null; tags: string[] }
+    input: {
+      title: string;
+      summary: string | null;
+      tags: string[];
+      includeInGlobalSearch?: boolean;
+      archived?: boolean;
+    }
   ): Promise<ProjectRow> {
     if (!(await this.get(slug))) {
       throw new Error(`Unknown project: ${slug}`);
@@ -81,6 +95,8 @@ export class ProjectsService {
         title: input.title,
         summary: input.summary,
         tags: JSON.stringify(input.tags),
+        ...(input.includeInGlobalSearch !== undefined ? { includeInGlobalSearch: input.includeInGlobalSearch } : {}),
+        ...(input.archived !== undefined ? { archived: input.archived } : {}),
         updatedAt: sql`(datetime('now'))`,
       })
       .where(eq(projects.slug, slug));
@@ -134,6 +150,11 @@ export class ProjectsService {
         updatedAt: sql`(datetime('now'))`,
       })
       .where(eq(projects.slug, slug));
+
+    // Index after the R2 write succeeded. indexEntries never throws.
+    const indexing = indexEntries(this.env, slug, [entry]);
+    if (this.ctx) this.ctx.waitUntil(indexing);
+    else await indexing;
   }
 
   /** Appends a new revision of an existing entity, merging `updates` onto

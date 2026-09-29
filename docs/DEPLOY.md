@@ -28,6 +28,15 @@ from `server/`.
    # random string. Log into the web UI with it once, create a real
    # `admin`-scoped token from the Tokens page, and prefer that afterward.
 
+3b. Optional — hybrid semantic search. The `[ai]`, `[[vectorize]]` and
+   `[[workflows]]` blocks in wrangler.toml.example need a Vectorize index to
+   exist before `wrangler deploy` (or delete those blocks for keyword-only
+   search). From `server/`:
+   wrangler vectorize create dams-memory --dimensions=1024 --metric=cosine
+   wrangler vectorize create-metadata-index dams-memory --property-name=projectSlug --type=string
+   After the first deploy, backfill existing entries once:
+   POST /api/search/reindex with an admin token (see README).
+
 4. Deploy — from the repo root. This builds the client workspace into
    `client/dist` and then runs `wrangler deploy` in `server/`, which serves
    that build as static assets:

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { deleteDocSchema, docFilenameSchema, updateDocSchema } from "../docs/schema";
+import { planInputSchema } from "../actions/schema";
 import { entityCategorySchema, memoryEntrySchema, slugSchema } from "../projects/schema";
 
 // MCP tool input schemas.
@@ -24,6 +25,15 @@ export const appendMemoryInput = {
 export const askMemoryInput = {
   slug: slugSchema,
   question: z.string().min(1).max(4000),
+};
+
+export const searchMemoryInput = {
+  query: z.string().min(1).max(500),
+  // Naming a project explicitly is the one way to search one that hasn't
+  // opted in to global search (includeInGlobalSearch) — never a way around a
+  // token's project allow-list.
+  projectSlugs: z.array(slugSchema).max(20).optional(),
+  topK: z.number().int().min(1).max(20).optional(),
 };
 
 export const appendDocInput = {
@@ -54,4 +64,13 @@ export const updateEntityInput = {
   // Any other entity content fields to merge in beyond `category` — merged
   // onto the existing entry's content, same as `category` would be.
   fields: z.record(z.unknown()).optional(),
+};
+
+// propose_actions reuses the canonical plan shape from the actions module.
+// Proposing only ever files a pending plan; an admin approves it in the web
+// UI, and nothing arriving over MCP executes.
+export const proposeActionsInput = planInputSchema.shape;
+
+export const getTaskInput = {
+  id: z.string().uuid(),
 };

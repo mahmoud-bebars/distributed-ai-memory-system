@@ -38,12 +38,12 @@ scaffold. Reason: Prisma/Sequelize (the usual preference) don't run
 natively on the Workers runtime; Drizzle is the ORM that actually works at
 the edge and still gives real types from the schema.
 
-**Chat-with-memory is naive on purpose, for now.** `ChatService` dumps the
-full `memory.jsonl` into the system prompt and asks Claude
-(`claude-sonnet-5` via the Messages API) to answer from it. No retrieval,
-no embeddings. This is a known, accepted limitation, not an oversight — it
-degrades (context gets large) rather than fails, and buying real retrieval
-before there's enough real memory data to need it would be premature.
+**Chat-with-memory is retrieval-driven.** (Updated — this used to dump the
+full `memory.jsonl` into the prompt.) `ChatService` gives Claude
+(`claude-sonnet-5`) search tools it executes itself; memory search goes
+through the hybrid Vectorize + FTS5 index (`modules/search`) and falls back
+to a keyword scorer when the index can't answer. Retrieved text is untrusted
+and delimited. See CLAUDE.md's "Search index conventions".
 
 **MCP comes after the REST layer, not instead of it.** The `/api/projects`
 REST endpoints are the actual implementation. MCP tools (`list_projects`,
