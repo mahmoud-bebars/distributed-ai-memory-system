@@ -139,20 +139,27 @@ values from build variables.
    Authorize Cloudflare's GitHub App, pick the repo and the branch that
    should auto-deploy (e.g. `main`).
 
-2. Set (leave the Advanced **Path** field at its default `/` — these
-   commands don't depend on it):
-   - **Build command:**
-     `npm install && npm run build && bash server/scripts/render-wrangler-toml.sh`
-   - **Deploy command:**
-     `npx wrangler d1 migrations apply DAMS_DB --remote --config server/wrangler.toml && npx wrangler deploy --config server/wrangler.toml`
+2. Set the build and deploy commands. **They depend on the Advanced "Path"
+   (root directory) field** — both commands run from that directory, and
+   the deploy command fails with `Could not read file …/server/server/wrangler.toml`
+   if the `--config` path doesn't match it:
 
-   Both run from the repo root. The deploy command applies any pending D1
-   migrations **before** shipping the code that needs them (it's a no-op
-   when there's nothing new, and each migration is applied exactly once).
-   If you'd rather run migrations by hand, use just
-   `npx wrangler deploy --config server/wrangler.toml` and run
-   `npm run db:migrate:remote` yourself before pushing a change that adds a
-   migration.
+   | Path | Build command | Deploy command |
+   |---|---|---|
+   | `/` (repo root) | `npm install && npm run build && bash server/scripts/render-wrangler-toml.sh` | `npx wrangler d1 migrations apply DAMS_DB --remote --config server/wrangler.toml && npx wrangler deploy --config server/wrangler.toml` |
+   | `/server` | `cd .. && npm install && npm run build && cd server && bash scripts/render-wrangler-toml.sh` | `npx wrangler d1 migrations apply DAMS_DB --remote && npx wrangler deploy` |
+
+   The build must run from the repo root for `npm install` to link the two
+   workspaces (hence the `cd ..` with Path `/server`), and it writes
+   `wrangler.toml` into `server/`; the deploy command just has to find that
+   file from wherever it runs.
+
+   The deploy command applies any pending D1 migrations **before** shipping
+   the code that needs them (it's a no-op when there's nothing new, and each
+   migration is applied exactly once; a failed migration stops the deploy).
+   If you'd rather run migrations by hand, use just the `wrangler deploy`
+   half and run `npm run db:migrate:remote` yourself before pushing a change
+   that adds a migration.
 
 3. **Build variables** (plain, not secrets):
 
