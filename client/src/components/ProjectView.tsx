@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PanelImperativeHandle } from "react-resizable-panels";
+import { useSearchParams } from "react-router";
 import { api, type MemoryEntry, type Project } from "@/api";
 import { ChatPanel } from "@/components/ChatPanel";
 import { DocsPanel } from "@/components/DocsPanel";
@@ -69,8 +70,24 @@ export function ProjectView({
   const [docFilenames, setDocFilenames] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [centerTab, setCenterTab] = useState<CenterTab>("graph");
-  const [rightTab, setRightTab] = useState<RightTab>("chat");
+  // Tab choice lives in the URL (?view=list&panel=docs) so a refresh or a
+  // shared link restores it; the defaults (graph / chat) stay out of the URL.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const centerTab: CenterTab = searchParams.get("view") === "list" ? "list" : "graph";
+  const rightTab: RightTab = searchParams.get("panel") === "docs" ? "docs" : "chat";
+  function setParam(key: "view" | "panel", value: string, fallback: string) {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (value === fallback) next.delete(key);
+        else next.set(key, value);
+        return next;
+      },
+      { replace: true },
+    );
+  }
+  const setCenterTab = (tab: CenterTab) => setParam("view", tab, "graph");
+  const setRightTab = (tab: RightTab) => setParam("panel", tab, "chat");
   // Which panel (if either) is blown up to fill the whole view — mutually
   // exclusive with the resizable split below.
   const [expandedPanel, setExpandedPanel] = useState<"center" | "right" | null>(
@@ -119,8 +136,6 @@ export function ProjectView({
     fetchMemory();
     fetchDocCount();
     setExpandedPanel(null);
-    setCenterTab("graph");
-    setRightTab("chat");
   }, [fetchMemory, fetchDocCount]);
 
   useEffect(() => {
@@ -136,7 +151,7 @@ export function ProjectView({
   // (entries table) view.
   useKeySequence(
     ["g", "l"],
-    () => setCenterTab((t) => (t === "list" ? "graph" : "list")),
+    () => setCenterTab(centerTab === "list" ? "graph" : "list"),
     true,
   );
 

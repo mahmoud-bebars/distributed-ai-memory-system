@@ -257,9 +257,9 @@ reconstructs a real one from the template at CI build time; see
   `not_found_handling = "single-page-application"` specifically so a cold
   page load of `/share/:token` (a client-side-only route, no matching
   static file) falls back to `index.html` instead of 404ing.
-- Frontend: `client/src/main.tsx` does a plain path check
-  (`/^\/share\/([^/]+)/`) — no router library — and renders `ShareView`
-  instead of `App` when it matches. `ShareView` first calls
+- Frontend: `client/src/main.tsx` mounts a `react-router` `BrowserRouter`;
+  the public `/share/:token` route renders `ShareView` outside `AuthGate`,
+  everything else goes through `AuthGate` → `App`. `ShareView` first calls
   `api.getShareMeta(token)` to learn which tabs it's allowed to offer
   *before* rendering the tab list at all, so a docs-off/chat-off link never
   even shows those triggers rather than showing-then-hiding them. It
@@ -272,6 +272,24 @@ reconstructs a real one from the template at CI build time; see
   regardless of link settings. The authenticated app manages links (plural
   now) through `ShareDialog`, opened from `ProjectView`'s consolidated
   actions dropdown — create/edit/revoke any number of them per project.
+
+## Frontend routing (react-router)
+
+- The URL is the source of truth for the authenticated app — a refresh or
+  pasted link lands on the same page. Routes (`client/src/App.tsx`): `/`
+  (overview), `/new`, `/projects/:slug` (tab state in `?view=list&panel=docs`;
+  graph/chat are the defaults and stay out of the URL), `/guide`,
+  `/assistant`, `/plans`, `/tokens`, and a not-found fallback. The header
+  renders `AppBreadcrumbs` from a per-route crumb list in `App`; add a crumb
+  there whenever you add a route.
+- App route paths must not collide with the Worker's own prefixes (`/api`,
+  `/mcp`, `/.well-known`) or the SHARE_HOSTNAME allow-list. Deep links work in
+  production only because `wrangler.toml`'s `[assets]` has
+  `not_found_handling = "single-page-application"` — don't remove it.
+  `index.html` references public files with absolute paths (`/favicon.svg`)
+  so they resolve from nested routes.
+- Project slugs live under `/projects/`, so a slug can never shadow a
+  top-level page like `/new`.
 
 ## Frontend conventions (shadcn/ui)
 
@@ -289,10 +307,9 @@ reconstructs a real one from the template at CI build time; see
 - Path alias `@/*` → `client/src/*` (see `client/tsconfig.json` and
   `client/vite.config.ts`) — shadcn components import via `@/lib/utils` etc.,
   so new files should follow that convention too.
-- Layout is sidebar + tabs, not the old list/detail toggle: `AppSidebar`
-  (project switcher) wraps `SidebarProvider`/`SidebarInset`, and
-  `ProjectView` renders `Tabs` (Graph / Entries / Chat / Prompts) plus the
-  Share and Export controls, per project.
+- Layout: header (project switcher + breadcrumbs) over routed pages;
+  `ProjectView` renders `Tabs` (Graph / List, Chat / Docs) plus the Share and
+  Export controls, per project.
 - Guide and prompt-template content lives in the app itself, not this
   repo's docs: `client/src/components/GuidePage.tsx` (linked from the
   sidebar, next to "New project") documents the MCP connect command, the

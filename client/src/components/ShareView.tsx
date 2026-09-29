@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type MemoryEntry, type ShareMeta } from "@/api";
+import { AppBreadcrumbs } from "@/components/AppBreadcrumbs";
 import { ChatPanel } from "@/components/ChatPanel";
 import { DocsPanel } from "@/components/DocsPanel";
 import { EntriesTable } from "@/components/EntriesTable";
@@ -74,9 +75,13 @@ export function ShareView({ token }: { token: string }) {
         >
           <Sparkles className="size-4 text-primary-foreground" />
         </span>
-        <span className="flex-1 truncate text-sm font-medium text-muted-foreground">
-          {meta ? `${meta.project.title} — shared, read-only` : "Shared memory — read-only"}
-        </span>
+        <AppBreadcrumbs
+          className="min-w-0 flex-1"
+          crumbs={[
+            { label: "Shared" },
+            { label: meta ? `${meta.project.title} (read-only)` : "Read-only" },
+          ]}
+        />
         <ModeToggle />
       </header>
       <main className="min-h-0 flex-1 overflow-hidden p-4">

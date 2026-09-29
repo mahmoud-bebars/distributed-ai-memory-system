@@ -66,9 +66,9 @@ crons = ["*/15 * * * *", "0 3 * * *"]
 [assets]
 directory = "../client/dist"
 binding = "ASSETS"
-# Needed for /share/:token — it's a client-side-only route (no matching
-# static file), so a direct page load must fall back to index.html and let
-# main.tsx's own path check render ShareView.
+# Needed for every client-side route (/share/:token, /projects/:slug, /guide,
+# …) — none has a matching static file, so a direct page load or refresh must
+# fall back to index.html and let react-router render the right page.
 not_found_handling = "single-page-application"
 
 [vars]
