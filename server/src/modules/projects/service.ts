@@ -2,7 +2,7 @@ import { desc, eq, sql } from "drizzle-orm";
 import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
 import { projects, type ProjectRow } from "../../db/schema";
 import type { Bindings } from "../../lib/bindings";
-import { indexEntries } from "../search/indexer";
+import { indexEntries, isIndexable, reindexProjectInline, removeProjectFromIndex } from "../search/indexer";
 import type { CreateProjectInput, MemoryEntry } from "./schema";
 
 const r2KeyFor = (slug: string) => `${slug}/memory.jsonl`;
@@ -85,7 +85,8 @@ export class ProjectsService {
       archived?: boolean;
     }
   ): Promise<ProjectRow> {
-    if (!(await this.get(slug))) {
+    const before = await this.get(slug);
+    if (!before) {
       throw new Error(`Unknown project: ${slug}`);
     }
 
@@ -101,7 +102,32 @@ export class ProjectsService {
       })
       .where(eq(projects.slug, slug));
 
-    return (await this.get(slug))!;
+    const after = (await this.get(slug))!;
+
+    // The search index follows the opt-in flag: turning a project on indexes
+    // it, turning it off (or archiving it) removes it from the index.
+    if (!isIndexable(before) && isIndexable(after)) await this.scheduleProjectReindex(slug);
+    else if (isIndexable(before) && !isIndexable(after)) await this.background(removeProjectFromIndex(this.env, slug));
+
+    return after;
+  }
+
+  private async background(task: Promise<unknown>): Promise<void> {
+    const safe = task.catch(() => {});
+    if (this.ctx) this.ctx.waitUntil(safe);
+    else await safe;
+  }
+
+  private async scheduleProjectReindex(slug: string): Promise<void> {
+    if (this.env.SEARCH_WORKFLOW) {
+      try {
+        await this.env.SEARCH_WORKFLOW.create({ params: { slugs: [slug] } });
+        return;
+      } catch {
+        // Fall through to the inline path.
+      }
+    }
+    await this.background(reindexProjectInline(this.env, slug, () => this.readMemory(slug)));
   }
 
   /** Reads the full JSONL blob and parses it into entries. Fine at small scale;
@@ -151,10 +177,10 @@ export class ProjectsService {
       })
       .where(eq(projects.slug, slug));
 
-    // Index after the R2 write succeeded. indexEntries never throws.
-    const indexing = indexEntries(this.env, slug, [entry]);
-    if (this.ctx) this.ctx.waitUntil(indexing);
-    else await indexing;
+    // Index after the R2 write succeeded — but only projects that are opted in
+    // to global search (and not archived); others stay out of the index (and
+    // out of the Free plan's Vectorize quota). indexEntries never throws.
+    if (isIndexable(project)) await this.background(indexEntries(this.env, slug, [entry]));
   }
 
   /** Appends a new revision of an existing entity, merging `updates` onto

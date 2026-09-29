@@ -35,7 +35,7 @@ npx wrangler r2 bucket create dmas
 ```
 
 **2. Apply the schema to the remote database** (from the repo root; runs
-every migration in `server/migrations/`, currently `0001`–`0008`):
+every migration in `server/migrations/`, currently `0001`–`0009`):
 
 ```bash
 npm run db:migrate:remote
@@ -92,7 +92,9 @@ curl -X POST https://memory.example.com/api/projects \
   -H 'authorization: Bearer <DAMS_ADMIN_TOKEN>' \
   -d '{"slug":"ghoraf","title":"Ghoraf"}'
 
-# backfill the search index for anything that already exists (admin token)
+# index projects that are already opted in (admin token). Optional: the nightly
+# cron does this on its own, and the dashboard's "Reindex now" button is the
+# same call. Pass {"project":"<slug>"} to reindex just one.
 curl -X POST https://memory.example.com/api/search/reindex \
   -H 'authorization: Bearer <admin token>'
 
@@ -104,7 +106,22 @@ curl https://memory.example.com/api/search/status \
 Then, in the web UI: create scoped tokens for your AI clients (Tokens
 page), and turn on **Include in global search** for each project the
 assistant and `search_memory` may read (Edit project — it's off by
-default).
+default). **The search index follows that switch:** only opted-in projects
+are indexed (which also keeps you inside Vectorize's free-plan quota).
+Turning it on indexes the project automatically; turning it off, or
+archiving, removes it from the index. A project you *name explicitly* in a
+search but that isn't opted in is scanned directly from its log instead
+(keyword scoring, no vectors).
+
+### Keeping the index in sync
+
+| What | When | Effect |
+|---|---|---|
+| Append-time indexing | every `append_memory` / plan action, opted-in projects only | The new entry is searchable within seconds; can never fail the write |
+| Toggle the switch | Edit project | On → the project is indexed (Workflow); off / archive → removed from the index |
+| **Nightly reconcile** (cron `0 3 * * *`) | 03:00 UTC | Purges anything that shouldn't be indexed and re-indexes any opted-in project never fully indexed or changed since (`projects.search_indexed_at` vs `updated_at`). Idle projects cost nothing |
+| 15-minute sweep (cron `*/15 * * * *`) | every 15 min | Retries entries whose embedding failed or was paused by the Workers AI budget |
+| **Reindex now** | admin button on the dashboard (all) and in a project's menu (one), or `POST /api/search/reindex` | Immediate full re-index of opted-in projects |
 
 ## Continuous deployment (Cloudflare Workers Builds)
 
@@ -162,8 +179,8 @@ default Workers Builds token has it).
    `[[workflows]]`, `[triggers]`), copy them into your own `wrangler.toml`
    (CI-rendered deployments get them automatically) and create any resource
    they need first.
-3. Deploy. Then re-run `POST /api/search/reindex` if search indexing
-   changed.
+3. Deploy. If search indexing changed, click **Reindex now** (or wait for
+   the nightly reconcile).
 
 Migrations are additive and never drop data. The search tables are derived
 indexes: if one is ever lost, `POST /api/search/reindex` rebuilds it from R2.
@@ -189,6 +206,7 @@ indexes: if one is ever lost, `POST /api/search/reindex` rebuilds it from R2.
 | `SEARCH_WORKFLOW` | Workflow | no | Search backfill (falls back to inline) |
 | `ACTIONS_WORKFLOW` | Workflow | no | Approved-plan execution (falls back to inline) |
 | cron `*/15 * * * *` | Trigger | no | Retries paused/failed indexing; expires stale plans; syncs task status |
+| cron `0 3 * * *` | Trigger | no | Nightly search-index reconcile (must match `RECONCILE_CRON` in `server/src/index.ts`) |
 
 Every optional binding degrades gracefully when absent — none can make a
 memory write fail.
@@ -241,7 +259,7 @@ breaking writes when it doesn't fit:
   aren't in the deployed config; check `wrangler.toml`.
 - **Search returns nothing for a project** — it's off for global search
   (turn the switch on, or name it explicitly), or hasn't been indexed yet
-  (`POST /api/search/reindex`).
+  (click **Reindex now**, or wait for the nightly reconcile).
 - **Plan stuck `running`** — resume it from the assistant's task list or
   `POST /api/plans/:id/resume` (admin).
 - **Chat/assistant says the budget is spent** — raise `LLM_DAILY_TOKEN_CAP`

@@ -1,5 +1,7 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
+import { z } from "zod";
+import { slugSchema } from "../projects/schema";
 import type { Bindings } from "../../lib/bindings";
 import type { TokenAuth } from "../tokens";
 import { searchQuerySchema } from "./schema";
@@ -26,9 +28,20 @@ searchRoutes.get("/status", async (c) => {
   return c.json(await new SearchService(c.env).status());
 });
 
-// POST /api/search/reindex — admin only (gated in index.ts). Starts the
-// backfill Workflow (or the inline fallback when no Workflows binding is set).
+// POST /api/search/reindex — admin only (gated in index.ts). Re-indexes every
+// project that's opted in to global search, or just `{ "project": "<slug>" }`
+// (which must be opted in). Starts the backfill Workflow (or the inline
+// fallback when no Workflows binding is set). The body is optional.
+const reindexBodySchema = z.object({ project: slugSchema.optional() });
+
 searchRoutes.post("/reindex", async (c) => {
-  const mode = await new SearchService(c.env, c.executionCtx).startReindex();
-  return c.json({ started: mode }, 202);
+  const body = reindexBodySchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!body.success) return c.json({ error: "Invalid body" }, 400);
+  try {
+    const result = await new SearchService(c.env, c.executionCtx).startReindex(body.data.project);
+    return c.json(result, 202);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    return c.json({ error: message }, message.startsWith("Project isn't included") ? 409 : 500);
+  }
 });

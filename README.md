@@ -23,7 +23,11 @@ append-only `memory.jsonl` — the source of truth), Vectorize + Workers AI
   incl. Arabic) and keyword (D1 FTS5) fused with reciprocal rank fusion.
   Available as the `search_memory` MCP tool and `GET /api/search`; per-project
   chat and `ask_memory` use it for retrieval. **Opt-in per project**
-  ("Include in global search", off by default).
+  ("Include in global search", off by default) — and the index follows that
+  flag: only opted-in projects are indexed, turning it on indexes the project
+  automatically, turning it off (or archiving) removes it from the index. A
+  nightly cron reconciles anything that drifted, and admins get a **Reindex
+  now** button (dashboard, plus per project) for when you don't want to wait.
 - **Global assistant** — a chat that sits outside any project: it searches
   across the projects you opted in (or name), answers with **citations to the
   exact entries it used**, and proposes organising changes. Every turn is a
@@ -138,7 +142,8 @@ npx wrangler vectorize create-metadata-index dams-memory --property-name=project
 cd ..
 npm run db:migrate:remote
 npm run deploy
-# then, once: POST /api/search/reindex with an admin token
+# then (optional — the nightly cron does it too): the "Reindex now" button, or
+# POST /api/search/reindex with an admin token
 ```
 
 **Continuous deployment** via Cloudflare Workers Builds is supported: the
@@ -156,6 +161,7 @@ pending D1 migrations before shipping the code that needs them. Set
 | Binding | `DAMS_DB` (D1), `DAMS_BUCKET` (R2), `ASSETS` | Required |
 | Binding | `AI`, `VECTORIZE` | Optional — semantic search |
 | Binding | `SEARCH_WORKFLOW`, `ACTIONS_WORKFLOW` | Optional — durable backfill / plan execution (inline fallback) |
+| Cron | `*/15 * * * *`, `0 3 * * *` | Retry sweep + plan expiry + task sync; nightly search reconcile |
 | Var | `LLM_DAILY_TOKEN_CAP` (500k), `LLM_TASK_TOKEN_CAP` (100k) | Anthropic token budgets |
 | Var | `WORKERS_AI_DAILY_TOKEN_CAP` (5M) | Embedding budget |
 | Var | `SHARE_HOSTNAME`, `ENVIRONMENT` | Share-link hostname; cookie `Secure` flag |
@@ -203,7 +209,7 @@ default to `read_only` for GET and `read_write` otherwise.
 | Docs | `GET/POST /api/projects/:slug/docs`, `GET/PUT/DELETE …/docs/:filename` |
 | Chat | `POST /api/projects/:slug/chat` (SSE) |
 | Share links | `GET/POST /api/projects/:slug/share`, `PATCH/DELETE …/share/:token`; public: `GET /api/share/:token[/memory\|/docs…]`, `POST /api/share/:token/chat` |
-| Search | `GET /api/search?q=&projects=&topK=`, `GET /api/search/status`, `POST /api/search/reindex` (admin) |
+| Search | `GET /api/search?q=&projects=&topK=`, `GET /api/search/status`, `POST /api/search/reindex` (admin; optional body `{"project":"<slug>"}`) |
 | Plans | `GET/POST /api/plans`, `GET /api/plans/:id`, `POST …/:id/approve\|reject\|resume` (admin) |
 | Assistant | `POST /api/assistant/chat` (SSE), `GET …/conversations[/:id]`, `GET …/tasks[/:id]`, `POST …/tasks/:id/cancel\|resume` (admin) |
 | Tokens | `GET/POST /api/tokens`, `DELETE /api/tokens/:id` (admin) |
@@ -215,7 +221,7 @@ default to `read_only` for GET and `read_write` otherwise.
 server/                    Cloudflare Worker (Hono + D1 + R2)
   wrangler.toml.example      Config template (wrangler.toml is git-ignored)
   scripts/                   render-wrangler-toml.sh — builds wrangler.toml for CI
-  migrations/                D1 migrations 0001–0008, hand-written, applied in order
+  migrations/                D1 migrations 0001–0009, hand-written, applied in order
   src/
     index.ts                 Entry: routes, auth mounts, cron, Workflow exports
     lib/                     bindings, budget (token caps), llm (structured output), untrusted

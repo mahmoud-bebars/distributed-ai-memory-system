@@ -8,6 +8,8 @@ export interface Project {
   // Privacy flag: false keeps the project out of cross-project search (and
   // the global assistant) unless a request names it explicitly.
   includeInGlobalSearch: boolean;
+  // When the project was last fully indexed for search (null = never).
+  searchIndexedAt: string | null;
   // Soft archive — hidden from default cross-project search, never deleted.
   archived: boolean;
   createdAt: string;
@@ -65,6 +67,16 @@ export interface ChatStreamHandlers {
   onProposedAction: (action: ProposedAction) => void;
   onError: (message: string) => void;
   onDone: () => void;
+}
+
+export interface SearchStatus {
+  vectors: boolean;
+  eligibleProjects: number;
+  total: number;
+  indexed: number;
+  pending: number;
+  failed: number;
+  keywordOnly: number;
 }
 
 // Action plans (propose → approve → execute). Mirrors
@@ -459,6 +471,13 @@ export const api = {
    *  an unexpected failure. */
   me: () => request<AuthIdentity>("/auth/me"),
   listTokens: () => request<ApiToken[]>("/tokens"),
+  getSearchStatus: () => request<SearchStatus>("/search/status"),
+  /** Re-index every opted-in project, or just `project` (admin). */
+  reindexSearch: (project?: string) =>
+    request<{ started: "workflow" | "inline"; projects: number }>("/search/reindex", {
+      method: "POST",
+      body: JSON.stringify(project ? { project } : {}),
+    }),
   listPlans: () => request<StoredPlan[]>("/plans"),
   getPlan: (id: string) => request<StoredPlan>(`/plans/${id}`),
   resumePlan: (id: string) => request<StoredPlan>(`/plans/${id}/resume`, { method: "POST" }),

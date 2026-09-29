@@ -72,7 +72,9 @@ to a keyword scorer. Everything retrieved is untrusted data.
   share-hostname guard.
 - **Hybrid search** — Workers AI `bge-m3` → Vectorize + D1 FTS5, reciprocal
   rank fusion, `search_memory` / `GET /api/search`, backfill Workflow, cron
-  sweep, per-project privacy flag.
+  sweep, per-project privacy flag. The index follows the flag (only opted-in
+  projects are indexed), with a nightly reconcile cron and a "Reindex now"
+  admin button.
 - **Actions with approval** — typed plans (`create_project`,
   `update_project`, `archive_project`, `tag_entries`, `move_entries`,
   `write_synthesis`), validated in code, approved by an admin, executed

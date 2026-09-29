@@ -59,9 +59,11 @@ type RightTab = "chat" | "docs";
 export function ProjectView({
   project,
   onProjectUpdated,
+  isAdmin = false,
 }: {
   project: Project;
   onProjectUpdated: (project: Project) => void;
+  isAdmin?: boolean;
 }) {
   const [entries, setEntries] = useState<MemoryEntry[]>([]);
   const [docFilenames, setDocFilenames] = useState<string[]>([]);
@@ -396,6 +398,16 @@ export function ProjectView({
                 <Share2 className="size-4" />
                 Share project…
               </DropdownMenuItem>
+              {isAdmin && project.includeInGlobalSearch && (
+                <DropdownMenuItem
+                  onSelect={() => {
+                    api.reindexSearch(project.slug).catch(() => {});
+                  }}
+                >
+                  <RefreshCw className="size-4" />
+                  Reindex for search
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem onSelect={() => setPromptsOpen(true)}>
                 <Wand2 className="size-4" />
                 Prompts

@@ -213,11 +213,13 @@ export default function App({
           />
         ) : selectedProject ? (
           <ProjectView
+            isAdmin={identity.scope === "admin"}
             project={selectedProject}
             onProjectUpdated={handleProjectUpdated}
           />
         ) : (
           <ProjectsOverview
+            isAdmin={identity.scope === "admin"}
             projects={projects}
             onSelect={selectProject}
             onCreate={() => setView("create")}

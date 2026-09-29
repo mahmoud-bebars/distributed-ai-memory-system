@@ -136,6 +136,9 @@ app.get("*", (c) => c.env.ASSETS.fetch(c.req.raw));
 
 // The Workflow class must be exported from the Worker's entry module for the
 // [[workflows]] binding in wrangler.toml to find it.
+// Must match the second entry of [triggers] crons in wrangler.toml.example.
+const RECONCILE_CRON = "0 3 * * *";
+
 export { SearchBackfillWorkflow } from "./modules/search";
 export { ActionsWorkflow } from "./modules/actions";
 
@@ -143,7 +146,13 @@ export default {
   fetch: (request: Request, env: Bindings, ctx: ExecutionContext) => app.fetch(request, env, ctx),
   // Cron sweep (see [triggers] in wrangler.toml.example): retries entries
   // whose indexing was paused or failed. Never throws into the runtime.
-  async scheduled(_controller: ScheduledController, env: Bindings, ctx: ExecutionContext): Promise<void> {
+  async scheduled(controller: ScheduledController, env: Bindings, ctx: ExecutionContext): Promise<void> {
+    // Nightly: reconcile the search index (re-index opted-in projects that
+    // changed, purge the rest). Every other tick is the light 15-minute sweep.
+    if (controller.cron === RECONCILE_CRON) {
+      ctx.waitUntil(new SearchService(env).reconcile().catch((err) => console.error("search reconcile failed", err)));
+      return;
+    }
     ctx.waitUntil(new SearchService(env).sweep().catch((err) => console.error("search sweep failed", err)));
     // Approval timeout + keep task state in step with its plan.
     ctx.waitUntil(

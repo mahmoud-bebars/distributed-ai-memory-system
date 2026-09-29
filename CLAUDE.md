@@ -313,6 +313,16 @@ reconstructs a real one from the template at CI build time; see
 - Index keys are stable hashes (`text.ts`'s `indexKey`): entities key on
   project + name (last-write-wins, a revision overwrites), everything else on
   project + entry id. Re-indexing is idempotent by construction.
+- **The index follows the flag.** Only projects where `isIndexable`
+  (`search/indexer.ts`: `includeInGlobalSearch && !archived`) are indexed —
+  append-time indexing, backfill, sweep and reconcile all use that one rule.
+  `ProjectsService.update` indexes a project when it becomes indexable
+  (Workflow `params.slugs`, inline fallback) and removes it
+  (`removeProjectFromIndex`) when it stops being. A project named explicitly
+  but not indexed is scanned from its log (`SearchService.scanProject`).
+  `projects.search_indexed_at` (migration `0009`) vs `updated_at` drives the
+  nightly reconcile (`SearchService.reconcile`, cron `0 3 * * *` — keep it in
+  sync with `RECONCILE_CRON` in `index.ts`).
 - `ProjectsService.appendMemory` calls `indexEntries` (never throws) after
   the R2 write — indexing may never fail or block a write. Every binding
   (`AI`, `VECTORIZE`, `SEARCH_WORKFLOW`) is optional in `Bindings`; a missing

@@ -49,6 +49,9 @@ export interface SearchBackfillParams {
   // Where to resume after a chained instance hand-off: the project slug and
   // entry offset to continue from. Absent = start from the beginning.
   cursor?: { slug: string; offset: number };
+  // Only these projects (still subject to being opted in). Absent = every
+  // opted-in project. Carried across chained instances.
+  slugs?: string[];
 }
 
 // Params of the plan-execution Workflow (modules/actions/workflow.ts).

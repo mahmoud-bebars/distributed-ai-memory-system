@@ -1,11 +1,12 @@
 import type { Bindings } from "../../lib/bindings";
 import { Budget } from "../../lib/budget";
 import { canAccessProject, type TokenAuth } from "../tokens";
-import { ProjectsService } from "../projects/service";
+import { currentEntities, ProjectsService } from "../projects/service";
 import { CloudflareSearchIndex } from "./cloudflare-index";
+import { isIndexable, reindexProjectInline, removeProjectFromIndex } from "./indexer";
 import type { SearchHit } from "./index-interface";
 import { DEFAULT_TOP_K, type CitedHit, type SearchScope } from "./schema";
-import { indexKey } from "./text";
+import { entryText, indexKey } from "./text";
 
 // One backfill step handles this many entries — keeps each Workflow step far
 // under the Free plan's 10 ms CPU limit (the awaits on D1/Workers AI/Vectorize
@@ -13,6 +14,10 @@ import { indexKey } from "./text";
 export const BACKFILL_BATCH = 25;
 const SWEEP_PROJECTS = 5;
 const SWEEP_ENTRIES = 50;
+// A project named explicitly but not indexed (not opted in) is searched by a
+// direct scan of its log instead — cap how many such scans one query does.
+const MAX_SCANNED_PROJECTS = 5;
+const SCAN_SNIPPET_CHARS = 240;
 
 interface WaitUntil {
   waitUntil(promise: Promise<unknown>): void;
@@ -62,12 +67,51 @@ export class SearchService {
     const scope = await this.resolveScope(auth, input.projectSlugs);
     if (scope.slugs.length === 0) return { hits: [], unknown: scope.unknown };
 
-    const raw = await this.index.query({
-      text: input.query,
-      projectSlugs: scope.slugs,
-      topK: input.topK ?? DEFAULT_TOP_K,
-    });
+    const raw = await this.queryScoped(scope.slugs, input.query, input.topK ?? DEFAULT_TOP_K);
     return { hits: await this.withProjectTitles(raw), unknown: scope.unknown };
+  }
+
+  /** Runs a query over an authorised slug set. Opted-in projects go through
+   *  the hybrid index; a project that was named explicitly but isn't indexed
+   *  (not opted in) is scanned directly from its log with a simple keyword
+   *  score — the index only holds opted-in projects, but naming one is still
+   *  a supported way to search it. */
+  private async queryScoped(slugs: string[], text: string, topK: number): Promise<SearchHit[]> {
+    const indexable = new Set((await this.projects.list()).filter(isIndexable).map((p) => p.slug));
+    const indexed = slugs.filter((s) => indexable.has(s));
+    const scanned = slugs.filter((s) => !indexable.has(s)).slice(0, MAX_SCANNED_PROJECTS);
+
+    const [fromIndex, ...fromScans] = await Promise.all([
+      indexed.length > 0 ? this.index.query({ text, projectSlugs: indexed, topK }) : Promise.resolve<SearchHit[]>([]),
+      ...scanned.map((slug) => this.scanProject(slug, text, topK)),
+    ]);
+    return [fromIndex, ...fromScans].flat().sort((a, b) => b.score - a.score).slice(0, topK);
+  }
+
+  private async scanProject(slug: string, text: string, topK: number): Promise<SearchHit[]> {
+    const terms = (text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter((t) => t.length > 1);
+    if (terms.length === 0) return [];
+    const entries = await this.projects.readMemory(slug);
+    // Entities are last-write-wins: search the current view of them.
+    const pool = [...currentEntities(entries), ...entries.filter((e) => e.type !== "entity")];
+    return pool
+      .map((entry) => {
+        const body = entryText(entry);
+        const haystack = body.toLowerCase();
+        return { entry, body, matches: terms.reduce((n, t) => n + (haystack.split(t).length - 1), 0) };
+      })
+      .filter((r) => r.matches > 0)
+      .sort((a, b) => b.matches - a.matches)
+      .slice(0, topK)
+      // Rank-based scores on the same scale as reciprocal rank fusion, so scan
+      // and index hits can be merged.
+      .map((r, rank) => ({
+        entryId: r.entry.id,
+        projectSlug: slug,
+        score: 1 / (60 + rank + 1),
+        snippet: r.body.slice(0, SCAN_SNIPPET_CHARS),
+        createdAt: r.entry.created_at ?? null,
+      }));
   }
 
   /** Search over an explicit, already-authorised slug set — the assistant
@@ -75,7 +119,7 @@ export class SearchService {
    *  user) and passes exactly that. */
   async searchSlugs(slugs: string[], query: string, topK = DEFAULT_TOP_K): Promise<CitedHit[]> {
     if (slugs.length === 0) return [];
-    return this.withProjectTitles(await this.index.query({ text: query, projectSlugs: slugs, topK }));
+    return this.withProjectTitles(await this.queryScoped(slugs, query, topK));
   }
 
   /** Single-project retrieval for per-project chat — the caller already
@@ -97,7 +141,15 @@ export class SearchService {
     }));
   }
 
-  async status(): Promise<{ vectors: boolean; total: number; indexed: number; pending: number; failed: number; keywordOnly: number }> {
+  async status(): Promise<{
+    vectors: boolean;
+    eligibleProjects: number;
+    total: number;
+    indexed: number;
+    pending: number;
+    failed: number;
+    keywordOnly: number;
+  }> {
     const { results } = await this.env.DAMS_DB.prepare(
       "SELECT status, vectorized, COUNT(*) AS n FROM entry_index_status GROUP BY status, vectorized",
     ).all<{ status: string; vectorized: number; n: number }>();
@@ -114,11 +166,18 @@ export class SearchService {
       } else if (row.status === "pending") pending += row.n;
       else failed += row.n;
     }
-    return { vectors: this.vectorsConfigured, total, indexed, pending, failed, keywordOnly };
+    const eligibleProjects = (await this.projects.list()).filter(isIndexable).length;
+    return { vectors: this.vectorsConfigured, eligibleProjects, total, indexed, pending, failed, keywordOnly };
   }
 
-  async listProjectSlugs(): Promise<string[]> {
-    return (await this.projects.list()).map((p) => p.slug).sort();
+  /** Slugs that should be in the index right now: opted in and not archived
+   *  (optionally narrowed to `only`). */
+  async eligibleSlugs(only?: string[]): Promise<string[]> {
+    return (await this.projects.list())
+      .filter(isIndexable)
+      .map((p) => p.slug)
+      .filter((slug) => only === undefined || only.includes(slug))
+      .sort();
   }
 
   /** Indexes one batch of a project's entries. Idempotent — the index key is
@@ -129,29 +188,66 @@ export class SearchService {
     const entries = await this.projects.readMemory(slug);
     const slice = entries.slice(offset, offset + size);
     if (slice.length > 0) await this.index.upsert(slice.map((entry) => ({ projectSlug: slug, entry })));
-    return { total: entries.length, next: offset + size < entries.length ? offset + size : null };
+    const next = offset + size < entries.length ? offset + size : null;
+    if (next === null) {
+      await this.env.DAMS_DB.prepare("UPDATE projects SET search_indexed_at = datetime('now') WHERE slug = ?").bind(slug).run();
+    }
+    return { total: entries.length, next };
   }
 
-  /** Kicks off a full backfill: a Workflow instance when the binding exists,
-   *  otherwise a best-effort inline loop via waitUntil (each batch is still
-   *  small; it just isn't durable across restarts). */
-  async startReindex(): Promise<"workflow" | "inline"> {
+  /** Drops index rows/vectors of projects that are no longer eligible (turned
+   *  off for global search, archived, or indexed before that rule existed). */
+  async purgeIneligible(): Promise<void> {
+    const eligible = new Set(await this.eligibleSlugs());
+    const { results } = await this.env.DAMS_DB.prepare("SELECT DISTINCT project_slug FROM entry_index_status").all<{
+      project_slug: string;
+    }>();
+    for (const { project_slug: slug } of results) {
+      if (!eligible.has(slug)) await removeProjectFromIndex(this.env, slug);
+    }
+  }
+
+  /** Re-indexes opted-in projects: all of them, or just `slug`. Uses the
+   *  backfill Workflow when bound, otherwise a best-effort inline loop via
+   *  waitUntil (small batches; just not durable across restarts). Throws if
+   *  `slug` isn't eligible (not opted in / archived). */
+  async startReindex(slug?: string): Promise<{ started: "workflow" | "inline"; projects: number }> {
+    if (slug === undefined) await this.purgeIneligible();
+    const slugs = await this.eligibleSlugs(slug === undefined ? undefined : [slug]);
+    if (slug !== undefined && slugs.length === 0) {
+      throw new Error(`Project isn't included in global search: ${slug}`);
+    }
+    if (slugs.length === 0) return { started: this.env.SEARCH_WORKFLOW ? "workflow" : "inline", projects: 0 };
+    return { started: await this.dispatchReindex(slugs), projects: slugs.length };
+  }
+
+  private async dispatchReindex(slugs: string[]): Promise<"workflow" | "inline"> {
     if (this.env.SEARCH_WORKFLOW) {
-      await this.env.SEARCH_WORKFLOW.create({ params: {} });
+      await this.env.SEARCH_WORKFLOW.create({ params: { slugs } });
       return "workflow";
     }
     const run = async () => {
-      for (const slug of await this.listProjectSlugs()) {
-        let offset: number | null = 0;
-        while (offset !== null) {
-          offset = (await this.reindexBatch(slug, offset)).next;
-        }
-      }
+      for (const slug of slugs) await reindexProjectInline(this.env, slug, () => this.projects.readMemory(slug));
     };
     const task = run().catch(() => {});
     if (this.ctx) this.ctx.waitUntil(task);
     else await task;
     return "inline";
+  }
+
+  /** Nightly reconcile (cron): purge what shouldn't be indexed, then re-index
+   *  any opted-in project that was never fully indexed or changed since. This
+   *  is the "reindex runs on its own" path — a fresh deploy or a project
+   *  flipped on while a Workflow was unavailable converges without anyone
+   *  clicking anything. Idle projects cost nothing. */
+  async reconcile(): Promise<number> {
+    await this.purgeIneligible();
+    const drifted = (await this.projects.list())
+      .filter(isIndexable)
+      .filter((p) => p.searchIndexedAt === null || p.searchIndexedAt < p.updatedAt)
+      .map((p) => p.slug);
+    if (drifted.length > 0) await this.dispatchReindex(drifted);
+    return drifted.length;
   }
 
   /** Cron sweep: retries entries left pending/failed (embedding failed or the
@@ -162,10 +258,15 @@ export class SearchService {
     const vectorsOn = this.vectorsConfigured;
     if (vectorsOn && !(await new Budget(this.env).hasRoom("ai_tokens"))) return;
 
+    const eligible = (await this.eligibleSlugs()).slice(0, 90);
+    if (eligible.length === 0) return;
+    const inEligible = `project_slug IN (${eligible.map(() => "?").join(",")})`;
+
     const needsWork = vectorsOn ? "(status != 'indexed' OR vectorized = 0)" : "status = 'failed'";
     const db = this.env.DAMS_DB;
     const { results: slugs } = await db
-      .prepare(`SELECT DISTINCT project_slug FROM entry_index_status WHERE ${needsWork} LIMIT ${SWEEP_PROJECTS}`)
+      .prepare(`SELECT DISTINCT project_slug FROM entry_index_status WHERE ${needsWork} AND ${inEligible} LIMIT ${SWEEP_PROJECTS}`)
+      .bind(...eligible)
       .all<{ project_slug: string }>();
 
     for (const { project_slug: slug } of slugs) {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type Project } from "@/api";
 import { ProjectIcon } from "@/components/ProjectIcon";
+import { SearchIndexCard } from "@/components/SearchIndexCard";
 import { Button } from "@/components/ui/button";
 import { FolderPlus, Globe, Plus } from "lucide-react";
 
@@ -69,10 +70,12 @@ export function ProjectsOverview({
   projects,
   onSelect,
   onCreate,
+  isAdmin = false,
 }: {
   projects: Project[];
   onSelect: (slug: string) => void;
   onCreate: () => void;
+  isAdmin?: boolean;
 }) {
   if (projects.length === 0) {
     return (
@@ -103,6 +106,7 @@ export function ProjectsOverview({
         <h2 className="text-lg font-semibold leading-tight">Projects</h2>
         <p className="text-sm text-muted-foreground">Select a project to open it.</p>
       </div>
+      {isAdmin && <SearchIndexCard />}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {projects.map((project) => (
           <ProjectCard

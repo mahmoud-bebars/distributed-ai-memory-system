@@ -56,9 +56,12 @@ name = "dams-actions"
 binding = "ACTIONS_WORKFLOW"
 class_name = "ActionsWorkflow"
 
-# Retries entries whose embedding was paused (daily Workers AI budget) or failed.
+# Every 15 min: retry entries whose embedding was paused (daily Workers AI
+# budget) or failed, expire stale plans, sync task status. Nightly at 03:00 UTC:
+# reconcile the search index (re-index opted-in projects that changed, purge the
+# rest). The second entry must match RECONCILE_CRON in server/src/index.ts.
 [triggers]
-crons = ["*/15 * * * *"]
+crons = ["*/15 * * * *", "0 3 * * *"]
 
 [assets]
 directory = "../client/dist"

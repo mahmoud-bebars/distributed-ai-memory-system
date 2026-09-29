@@ -15,6 +15,10 @@ export const projects = sqliteTable("projects", {
   // Soft archive (migration 0007): hidden from default cross-project search,
   // never deleted; reversible.
   archived: integer("archived", { mode: "boolean" }).notNull().default(false),
+  // When this project was last fully (re)indexed for search (migration 0009).
+  // Null = never; the nightly reconcile re-indexes any opted-in project whose
+  // updatedAt is newer.
+  searchIndexedAt: text("search_indexed_at"),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(datetime('now'))`),

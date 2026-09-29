@@ -16,7 +16,9 @@ export class SearchBackfillWorkflow extends WorkflowEntrypoint<Bindings, SearchB
     const search = new SearchService(this.env);
     const cursor = event.payload.cursor;
 
-    const slugs = await step.do("list-projects", () => search.listProjectSlugs());
+    // Only opted-in projects (optionally narrowed by params.slugs).
+    const only = event.payload.slugs;
+    const slugs = await step.do("list-projects", () => search.eligibleSlugs(only));
     let steps = 1;
 
     for (const slug of slugs) {
@@ -26,7 +28,7 @@ export class SearchBackfillWorkflow extends WorkflowEntrypoint<Bindings, SearchB
       for (;;) {
         if (steps >= MAX_STEPS_PER_INSTANCE) {
           await step.do(`chain-${slug}-${offset}`, async () => {
-            await this.env.SEARCH_WORKFLOW?.create({ params: { cursor: { slug, offset } } });
+            await this.env.SEARCH_WORKFLOW?.create({ params: { cursor: { slug, offset }, slugs: only } });
             return { chained: true };
           });
           return;
