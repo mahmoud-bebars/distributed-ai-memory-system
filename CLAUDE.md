@@ -299,12 +299,81 @@ reconstructs a real one from the template at CI build time; see
   seed/sync prompt templates (`{PROJECT_SLUG}` substituted per project),
   rendered in `ProjectView`'s Prompts tab via `PromptsPanel`.
 
+## Search index conventions (cross-project assistant, phase 1)
+
+- `server/src/modules/search` owns hybrid search: Vectorize (bge-m3, 1024-d)
+  + D1 FTS5 (`entry_fts`, migration `0006`) fused by reciprocal rank fusion.
+  Both are **derived indexes** — always rebuildable from R2 via
+  `POST /api/search/reindex`; never treat them as a source of truth (this is
+  the one place D1 holds copied entry text, and it's allowed *because* it's
+  reconstructable). D1 can't export a DB containing FTS5 tables.
+- Index keys are stable hashes (`text.ts`'s `indexKey`): entities key on
+  project + name (last-write-wins, a revision overwrites), everything else on
+  project + entry id. Re-indexing is idempotent by construction.
+- `ProjectsService.appendMemory` calls `indexEntries` (never throws) after
+  the R2 write — indexing may never fail or block a write. Every binding
+  (`AI`, `VECTORIZE`, `SEARCH_WORKFLOW`) is optional in `Bindings`; a missing
+  one degrades to keyword-only, never to an error.
+- `projects.include_in_global_search` (default false) is the privacy flag.
+  Cross-project reads go through `SearchService.resolveScope`, which applies
+  the flag AND `canAccessProject`; a project named explicitly bypasses the
+  flag only, never the allow-list.
+- Anything retrieved from memory/docs enters an LLM prompt only via
+  `lib/untrusted.ts`'s `wrapUntrusted` with `UNTRUSTED_RULE` in the system
+  prompt. Every Anthropic call goes through `lib/budget.ts` (`assertLlmRoom`
+  before, `record` after).
+
+## Action plan conventions (cross-project assistant, phase 2)
+
+- `server/src/modules/actions` owns plans (`action_plans`/`plan_actions`/
+  `audit_log`, migration `0007`). The catalogue in `schema.ts` is the ONLY
+  set of things a model/client can ask for; add an action by extending the
+  discriminated union, `validate.ts`, `execute.ts` and the client preview in
+  `PlansPage.tsx` together.
+- **The single execution path:** `executeAction` (`execute.ts`) is reached
+  only via `ActionsService.runAction`, called after `ActionsService.approve`
+  moved the plan `pending → running` atomically (a second approval is a
+  409). Never call `executeAction` from a route, MCP tool or LLM path.
+- Proposing (REST `POST /api/plans`, MCP `propose_actions`, later the
+  assistant) only stores `pending`. Approve/reject require `admin` scope —
+  deliberately not `read_write`, so an MCP client can't approve its own plan.
+  Plan list/get are hidden from project-restricted tokens.
+- `create_project` needs the slug typed as a per-action confirmation
+  (`approvePlanSchema.confirmations`, enforced in `approve`, mirrored in
+  `PlansPage`). Don't fold it into a blanket approval.
+- Actions are append-only/idempotent: derived entry ids (`actionId`,
+  `actionId:entryId`, `actionId:moved`) + `appendOnce`. Never rewrite
+  `memory.jsonl`; archive is `projects.archived`, not a delete.
+
+## Assistant conventions (cross-project assistant, phase 3)
+
+- `server/src/modules/assistant` owns the global chat (`service.ts`'s
+  `chat()` generator), tasks (`tasks.ts`, D1 tables from migration `0008` —
+  D1 is the source of truth, Workflows never own task state) and its routes.
+- The model's only output is `moveEnvelopeSchema` via `lib/llm.ts`'s
+  `callStructured` (forced tool call, Zod-validated, one corrective retry).
+  There is deliberately NO write move; a plan goes through
+  `ActionsService.propose(..., "agent", readableSlugs)` and still needs an
+  admin approval. Don't add a move that mutates.
+- Per-turn read scope = `readableProjects()`: token allow-list ∩ (opted in to
+  global search ∪ named by the user in the conversation), minus archived
+  unless named. Search, read_entries, citations and plan validation are all
+  confined to it. Retrieved text only enters prompts via `wrapUntrusted`.
+- Citations are filtered to the turn's `retrieved` map in code. The
+  create_project gate (`lastAssistant.kind === "ask"`) is enforced in code,
+  not just in the prompt.
+- A task's status after a plan hand-off mirrors the plan
+  (`TasksService.refreshFromPlans`); approval timeout is
+  `ActionsService.expirePending` (cron), not a Workflow `waitForEvent`.
+- To exercise the loop without touching Anthropic, run `wrangler dev` with
+  `--var ANTHROPIC_BASE_URL:http://localhost:<port> --var ANTHROPIC_API_KEY:fake`
+  against a scripted stand-in for `/v1/messages`.
+
 ## What's deliberately not built yet
 
-- Retrieval for chat — `ChatService` currently dumps the whole project's
-  memory into the system prompt. Don't "fix" this by silently truncating;
-  if it needs to change, it should become real retrieval (embeddings +
-  top-k), flagged as a deliberate architecture change.
+- Undo: plans record an inverse per action, but nothing executes it yet.
+- Docs (`{slug}/docs/*.md`) aren't in the search index or the assistant's reach.
+- Per-action approval (a plan is approved or rejected as a whole).
 - Local sync CLI — not started. Should reuse the append-only id scheme
   (ulid per entry) so sync is a set union, never a merge conflict.
 

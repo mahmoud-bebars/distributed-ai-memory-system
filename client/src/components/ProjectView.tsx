@@ -36,6 +36,7 @@ import { downloadBlob, downloadJson } from "@/lib/export";
 import { parseTags } from "@/lib/tags";
 import {
   Download,
+  Globe,
   MessageCircle,
   Minimize2,
   MoreVertical,
@@ -345,8 +346,14 @@ export function ProjectView({
             {project.summary && (
               <p className="text-sm text-muted-foreground">{project.summary}</p>
             )}
-            {tags.length > 0 && (
+            {(tags.length > 0 || project.includeInGlobalSearch) && (
               <div className="mt-1.5 flex flex-wrap gap-1">
+                {project.includeInGlobalSearch && (
+                  <Badge variant="secondary" title="Included in cross-project search">
+                    <Globe />
+                    Global search
+                  </Badge>
+                )}
                 {tags.map((tag) => (
                   <Badge key={tag} variant="outline">
                     {tag}

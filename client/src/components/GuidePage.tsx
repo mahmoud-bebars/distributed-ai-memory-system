@@ -31,8 +31,27 @@ const TOOLS: { name: string; description: string }[] = [
       "Update an existing entity by appending a new revision that merges the given fields (e.g. category) onto its current content — last-write-wins, the append-only log keeps every prior revision. Fails if no entity with that name exists yet; use append_memory to create one.",
   },
   {
+    name: "search_memory",
+    description:
+      "Hybrid (semantic + keyword) search across projects. Returns matching entries with citations (project, entry id, date, snippet). Searches projects that opted in to global search unless you name projects explicitly.",
+  },
+  {
+    name: "propose_actions",
+    description:
+      "Propose a plan (create/update/archive a project, tag or move entries, write a synthesis). Files it as pending — nothing runs until the owner approves it on the Plans page; creating a project needs a separate, typed confirmation.",
+  },
+  {
+    name: "list_tasks",
+    description: "List what the global assistant is doing: active and recently finished tasks.",
+  },
+  {
+    name: "get_task",
+    description: "Get one assistant task by id, with its status, linked plan and event history.",
+  },
+  {
     name: "ask_memory",
-    description: "Ask a natural-language question and get an answer synthesized from a project's memory.",
+    description:
+      "Ask a natural-language question and get an answer synthesized from a project's memory, plus the entries it used as sources.",
   },
 ];
 

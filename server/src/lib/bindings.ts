@@ -4,6 +4,22 @@ export interface Bindings {
   ASSETS: Fetcher;
   ANTHROPIC_API_KEY: string;
 
+  // Optional search bindings — declared in wrangler.toml.example, wired to
+  // real resources from the Cloudflare dashboard / `wrangler vectorize
+  // create`. Every feature that uses them degrades when they're absent
+  // (keyword-only search, inline instead of Workflow execution) rather than
+  // failing, and none of them can ever fail a memory write.
+  AI?: Ai;
+  VECTORIZE?: Vectorize;
+  SEARCH_WORKFLOW?: Workflow<SearchBackfillParams>;
+  ACTIONS_WORKFLOW?: Workflow<ActionsWorkflowParams>;
+
+  // Optional free-tier budget guards (numbers as strings, since [vars] are
+  // strings). Unset means the defaults in lib/budget.ts.
+  LLM_DAILY_TOKEN_CAP?: string; // Anthropic tokens per UTC day
+  LLM_TASK_TOKEN_CAP?: string; // Anthropic tokens per single chat turn / task
+  WORKERS_AI_DAILY_TOKEN_CAP?: string; // estimated embedding tokens per UTC day
+
   // "development" locally (wrangler dev), unset/"production" when deployed —
   // gates the session cookie's Secure attribute (see modules/tokens/routes.ts),
   // since browsers reject Secure cookies over plain http.
@@ -24,4 +40,18 @@ export interface Bindings {
   // domain; share links then just resolve on whatever host served the
   // request, and the host-guard middleware in index.ts is skipped entirely.
   SHARE_HOSTNAME?: string;
+}
+
+// Params of the backfill Workflow (modules/search/workflow.ts). Lives here
+// so Bindings can name it without importing a module (modules import
+// Bindings, not the other way round).
+export interface SearchBackfillParams {
+  // Where to resume after a chained instance hand-off: the project slug and
+  // entry offset to continue from. Absent = start from the beginning.
+  cursor?: { slug: string; offset: number };
+}
+
+// Params of the plan-execution Workflow (modules/actions/workflow.ts).
+export interface ActionsWorkflowParams {
+  planId: string;
 }

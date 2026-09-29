@@ -22,7 +22,7 @@ projectsRoutes.post("/", zValidator("json", createProjectSchema), async (c) => {
   if (c.get("tokenAuth").projects !== null) {
     return c.json({ error: "A project-restricted token cannot create projects" }, 403);
   }
-  const service = new ProjectsService(c.env);
+  const service = new ProjectsService(c.env, c.executionCtx);
   try {
     const project = await service.create(c.req.valid("json"));
     return c.json(project, 201);
@@ -35,12 +35,13 @@ projectsRoutes.post("/", zValidator("json", createProjectSchema), async (c) => {
 
 projectsRoutes.patch("/:slug", zValidator("json", updateProjectSchema), async (c) => {
   const service = new ProjectsService(c.env);
-  const { title, summary, tags } = c.req.valid("json");
+  const { title, summary, tags, includeInGlobalSearch } = c.req.valid("json");
   try {
     const project = await service.update(c.req.param("slug"), {
       title: title.trim(),
       summary: summary.trim() || null,
       tags,
+      includeInGlobalSearch,
     });
     return c.json(project);
   } catch (err) {
@@ -76,7 +77,7 @@ projectsRoutes.post(
   "/:slug/memory",
   zValidator("json", appendMemorySchema),
   async (c) => {
-    const service = new ProjectsService(c.env);
+    const service = new ProjectsService(c.env, c.executionCtx);
     const { entry } = c.req.valid("json");
     await service.appendMemory(c.req.param("slug"), entry);
     return c.json({ ok: true }, 201);

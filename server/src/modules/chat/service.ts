@@ -13,6 +13,9 @@ import { DocsService } from "../docs/service";
 import type { MemoryEntry } from "../projects/schema";
 import { currentEntities, ProjectsService } from "../projects/service";
 import type { ProjectRow } from "../../db/schema";
+import { Budget } from "../../lib/budget";
+import { UNTRUSTED_RULE, wrapUntrusted } from "../../lib/untrusted";
+import { SearchService } from "../search";
 import {
   listDocsInputSchema,
   readDocInputSchema,
@@ -195,11 +198,15 @@ export class ChatService {
   private readonly projects: ProjectsService;
   private readonly docs: DocsService;
   private readonly client: Anthropic;
+  private readonly search: SearchService;
+  private readonly budget: Budget;
 
   constructor(private readonly env: Bindings) {
     this.projects = new ProjectsService(env);
     this.docs = new DocsService(env);
     this.client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
+    this.search = new SearchService(env);
+    this.budget = new Budget(env);
   }
 
   /** Validates the project (and, if given, the doc) exist BEFORE any
@@ -251,10 +258,9 @@ export class ChatService {
         `Answer only from this one doc — "${docFilename}" — which the user has`,
         "explicitly scoped this conversation to. If the answer isn't in it, say",
         "so plainly instead of guessing.",
+        UNTRUSTED_RULE,
         "",
-        `### ${docFilename}`,
-        "",
-        content,
+        wrapUntrusted([{ id: docFilename, body: content }]),
         ...mutatingToolsGuidance(allowMutatingTools),
       ].join("\n");
     } else {
@@ -307,6 +313,8 @@ export class ChatService {
         "project — optionally offering a couple of specific guesses at what",
         "they might mean — rather than guessing an answer. Never invent facts",
         "that weren't actually returned by a tool.",
+        "",
+        UNTRUSTED_RULE,
         ...mutatingToolsGuidance(allowMutatingTools),
       ].join("\n");
     }
@@ -317,8 +325,12 @@ export class ChatService {
     ];
 
     const collectedSources: ChatSource[] = [];
+    let turnTokens = 0;
 
     for (let round = 0; round < MAX_TOOL_ROUNDS + 1; round++) {
+      // Daily + per-turn LLM token caps, checked before every Anthropic call
+      // and logged after it (see lib/budget.ts).
+      await this.budget.assertLlmRoom(turnTokens);
       const offerTools = round < MAX_TOOL_ROUNDS;
       const tools = offerTools ? [...readOnlyTools, ...mutatingTools] : [];
 
@@ -347,6 +359,14 @@ export class ChatService {
       }
 
       const finalMessage = await stream.finalMessage();
+      const usage = finalMessage.usage;
+      const spent =
+        usage.input_tokens +
+        usage.output_tokens +
+        (usage.cache_creation_input_tokens ?? 0) +
+        (usage.cache_read_input_tokens ?? 0);
+      turnTokens += spent;
+      await this.budget.record("llm_tokens", spent);
       messages.push({ role: "assistant", content: finalMessage.content as unknown as ContentBlockParam[] });
 
       const toolUseBlock = finalMessage.content.find((b): b is ToolUseBlock => b.type === "tool_use");
@@ -431,28 +451,48 @@ export class ChatService {
 
   private async searchMemory(slug: string, query: string, limit = SEARCH_MEMORY_DEFAULT_LIMIT): Promise<ToolResult> {
     const entries = await this.projects.readMemory(slug);
-    // Entities are last-write-wins, so search the deduped "current" view of
-    // them; relations/observations are never deduped, every one is live.
-    const pool = [...currentEntities(entries), ...entries.filter((e) => e.type !== "entity")];
 
-    const scored = pool
-      .map((entry) => ({ entry, score: scoreText(query, `${summarizeEntry(entry)} ${JSON.stringify(entry.content)}`) }))
-      .filter(({ score }) => score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, limit);
+    // Hybrid index first (Vectorize + FTS5, fused). Hits are mapped back onto
+    // the real entries from R2 — the index only ever nominates ids, so what
+    // reaches the model (and what gets cited) is always genuine log content.
+    let matched: MemoryEntry[] = [];
+    try {
+      const byId = new Map(entries.map((e) => [e.id, e]));
+      const hits = await this.search.searchProject(slug, query, limit);
+      matched = hits.flatMap((h) => byId.get(h.entryId) ?? []);
+    } catch {
+      // Index unavailable (migration not applied, binding down): fall through.
+    }
 
-    if (scored.length === 0) {
+    // Fallback: the original keyword scorer, still used for a project that
+    // hasn't been indexed yet or when the index finds nothing.
+    if (matched.length === 0) {
+      // Entities are last-write-wins, so search the deduped "current" view of
+      // them; relations/observations are never deduped, every one is live.
+      const pool = [...currentEntities(entries), ...entries.filter((e) => e.type !== "entity")];
+      matched = pool
+        .map((entry) => ({ entry, score: scoreText(query, `${summarizeEntry(entry)} ${JSON.stringify(entry.content)}`) }))
+        .filter(({ score }) => score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limit)
+        .map(({ entry }) => entry);
+    }
+
+    if (matched.length === 0) {
       return { result: "No memory entries matched this query.", sources: [] };
     }
 
-    const sources: ChatSource[] = scored.map(({ entry }) => ({
+    const sources: ChatSource[] = matched.map((entry) => ({
       kind: "memory",
       id: entry.id,
       type: entry.type,
       summary: summarizeEntry(entry),
     }));
 
-    return { result: scored.map(({ entry }) => JSON.stringify(entry)).join("\n"), sources };
+    return {
+      result: wrapUntrusted(matched.map((entry) => ({ id: entry.id, body: JSON.stringify(entry) }))),
+      sources,
+    };
   }
 
   private async listDocsTool(slug: string): Promise<ToolResult> {
@@ -482,9 +522,12 @@ export class ChatService {
       snippet: snippetAround(content, query),
     }));
 
-    const result = scored
-      .map(({ filename, content }) => `### ${filename}\n\n${snippetAround(content, query, DOC_SNIPPET_RADIUS * 2)}`)
-      .join("\n\n---\n\n");
+    const result = wrapUntrusted(
+      scored.map(({ filename, content }) => ({
+        id: filename,
+        body: snippetAround(content, query, DOC_SNIPPET_RADIUS * 2),
+      })),
+    );
 
     return { result, sources };
   }
@@ -495,7 +538,7 @@ export class ChatService {
       return { result: `No doc named "${filename}" exists in this project.`, sources: [] };
     }
     return {
-      result: content,
+      result: wrapUntrusted([{ id: filename, body: content }]),
       sources: [{ kind: "doc", filename, snippet: content.length > 200 ? `${content.slice(0, 200)}…` : content }],
     };
   }

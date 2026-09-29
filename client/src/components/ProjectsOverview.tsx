@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api, type Project } from "@/api";
 import { ProjectIcon } from "@/components/ProjectIcon";
 import { Button } from "@/components/ui/button";
-import { FolderPlus, Plus } from "lucide-react";
+import { FolderPlus, Globe, Plus } from "lucide-react";
 
 function ProjectCard({ project, onSelect }: { project: Project; onSelect: () => void }) {
   const [docCount, setDocCount] = useState<number | null>(null);
@@ -48,6 +48,18 @@ function ProjectCard({ project, onSelect }: { project: Project; onSelect: () => 
         <span className="rounded-full bg-muted px-2 py-0.5 font-medium tabular-nums">
           {docCount === null ? "…" : docCount} {docCount === 1 ? "doc" : "docs"}
         </span>
+        {project.archived && (
+          <span className="rounded-full bg-muted px-2 py-0.5 font-medium">Archived</span>
+        )}
+        {project.includeInGlobalSearch && (
+          <span
+            title="Included in cross-project search"
+            className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 font-medium text-primary"
+          >
+            <Globe className="size-3" />
+            Global search
+          </span>
+        )}
       </div>
     </button>
   );

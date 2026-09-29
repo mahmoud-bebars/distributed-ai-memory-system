@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { parseTags } from "@/lib/tags";
 
@@ -37,6 +38,7 @@ export function EditProjectDialog({
   const [title, setTitle] = useState(project.title);
   const [summary, setSummary] = useState(project.summary ?? "");
   const [tags, setTags] = useState<string[]>(() => parseTags(project.tags));
+  const [includeInGlobalSearch, setIncludeInGlobalSearch] = useState(project.includeInGlobalSearch);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,6 +47,7 @@ export function EditProjectDialog({
       setTitle(project.title);
       setSummary(project.summary ?? "");
       setTags(parseTags(project.tags));
+      setIncludeInGlobalSearch(project.includeInGlobalSearch);
       setError(null);
     }
   }, [open, project]);
@@ -63,6 +66,7 @@ export function EditProjectDialog({
         title: trimmedTitle,
         summary: summary.trim(),
         tags,
+        includeInGlobalSearch,
       });
       onUpdated(updated);
       onOpenChange(false);
@@ -107,6 +111,20 @@ export function EditProjectDialog({
           <div className="space-y-2">
             <Label htmlFor="edit-project-tags">Tags</Label>
             <TagEditor id="edit-project-tags" tags={tags} onChange={setTags} />
+          </div>
+          <div className="flex items-start justify-between gap-4 rounded-lg border border-border p-3">
+            <div className="space-y-1">
+              <Label htmlFor="edit-project-global-search">Include in global search</Label>
+              <p className="text-xs text-muted-foreground">
+                Lets cross-project search and the assistant read this project. Off by default —
+                the project's own chat is unaffected either way.
+              </p>
+            </div>
+            <Switch
+              id="edit-project-global-search"
+              checked={includeInGlobalSearch}
+              onCheckedChange={setIncludeInGlobalSearch}
+            />
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
         </div>

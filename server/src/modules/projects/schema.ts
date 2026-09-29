@@ -11,6 +11,7 @@ export const createProjectSchema = z.object({
   title: z.string().min(1).max(200),
   summary: z.string().max(2000).optional(),
   tags: z.array(z.string()).default([]),
+  includeInGlobalSearch: z.boolean().default(false),
 });
 
 // Title, summary, and tags are editable after creation; the slug alone is
@@ -22,6 +23,8 @@ export const updateProjectSchema = z.object({
   title: z.string().min(1).max(200),
   summary: z.string().max(2000),
   tags: z.array(z.string()).default([]),
+  // Optional so existing clients that don't know the flag leave it untouched.
+  includeInGlobalSearch: z.boolean().optional(),
 });
 
 export const entityCategorySchema = z.enum([

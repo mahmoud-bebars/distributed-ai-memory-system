@@ -8,6 +8,13 @@ export const projects = sqliteTable("projects", {
   tags: text("tags").notNull().default("[]"), // JSON-encoded string array
   r2Key: text("r2_key").notNull(),
   entityCount: integer("entity_count").notNull().default(0),
+  // Privacy flag (migration 0006): false (default) keeps this project out of
+  // cross-project search and the global assistant unless a request names it
+  // explicitly. Per-project chat is unaffected.
+  includeInGlobalSearch: integer("include_in_global_search", { mode: "boolean" }).notNull().default(false),
+  // Soft archive (migration 0007): hidden from default cross-project search,
+  // never deleted; reversible.
+  archived: integer("archived", { mode: "boolean" }).notNull().default(false),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(datetime('now'))`),

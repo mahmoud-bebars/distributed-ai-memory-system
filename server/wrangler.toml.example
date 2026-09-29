@@ -20,6 +20,40 @@ database_id = "<YOUR_D1_DATABASE_ID>"          # wrangler d1 info dams_db
 binding = "DAMS_BUCKET"
 bucket_name = "dmas"
 
+# --- Optional: hybrid semantic + keyword search --------------------------
+# Everything from here to the [assets] block is optional. The app runs fine
+# without it: search falls back to keyword-only (D1 FTS5) and nothing that
+# writes memory ever depends on these. To use it, create the Vectorize index
+# once (bge-m3 is 1024-dimensional — the dimensions must match), then deploy:
+#
+#   wrangler vectorize create dams-memory --dimensions=1024 --metric=cosine
+#   wrangler vectorize create-metadata-index dams-memory --property-name=projectSlug --type=string
+#
+# If you don't want any of it, delete the four blocks below — `wrangler
+# deploy` fails if a [[vectorize]] binding points at an index that doesn't
+# exist yet. Workers Free plan is enough (see README's free-tier notes).
+[ai]
+binding = "AI"
+
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "dams-memory"
+
+[[workflows]]
+name = "dams-search-backfill"
+binding = "SEARCH_WORKFLOW"
+class_name = "SearchBackfillWorkflow"
+
+# Executes an approved action plan, one step per action.
+[[workflows]]
+name = "dams-actions"
+binding = "ACTIONS_WORKFLOW"
+class_name = "ActionsWorkflow"
+
+# Retries entries whose embedding was paused (daily Workers AI budget) or failed.
+[triggers]
+crons = ["*/15 * * * *"]
+
 [assets]
 directory = "../client/dist"
 binding = "ASSETS"
@@ -34,6 +68,11 @@ not_found_handling = "single-page-application"
 # overrides it back to "development" via .dev.vars (which takes precedence
 # over [vars]), since browsers reject Secure cookies over plain http.
 ENVIRONMENT = "production"
+# Optional free-tier budget guards (defaults in src/lib/budget.ts). Every
+# Anthropic call checks both first and logs its usage to D1.
+# LLM_DAILY_TOKEN_CAP = "500000"         # Anthropic tokens per UTC day
+# LLM_TASK_TOKEN_CAP = "100000"          # Anthropic tokens per chat turn / task
+# WORKERS_AI_DAILY_TOKEN_CAP = "5000000" # estimated embedding tokens per UTC day
 # Optional. Set this only if you want a second hostname (e.g. share.example.com,
 # uncommented in `routes` above) left outside whatever access control you put
 # in front of memory.example.com, so share-link recipients and /mcp clients
