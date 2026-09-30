@@ -21,14 +21,24 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  CONFIDENCE_LEVELS,
   categoryOf,
+  confidenceOf,
   currentEntities,
   observationText,
   relationLabel,
+  sourceOf,
   TYPE_BADGE_VARIANT,
 } from "@/lib/memory";
 
 type TypeFilter = "all" | MemoryEntry["type"];
+type ConfidenceFilter = "all" | (typeof CONFIDENCE_LEVELS)[number] | "unrecorded";
+
+const CONFIDENCE_VARIANT = {
+  extracted: "secondary",
+  inferred: "outline",
+  ambiguous: "destructive",
+} as const;
 
 function jsonPreview(entry: MemoryEntry): string {
   const text = JSON.stringify(entry.content);
@@ -36,6 +46,24 @@ function jsonPreview(entry: MemoryEntry): string {
 }
 
 function Summary({ entry }: { entry: MemoryEntry }) {
+  const confidence = confidenceOf(entry);
+  const source = sourceOf(entry);
+  return (
+    <div className="space-y-1">
+      <SummaryBody entry={entry} />
+      {(confidence || source) && (
+        <div className="flex flex-wrap items-center gap-2">
+          {confidence && <Badge variant={CONFIDENCE_VARIANT[confidence]}>{confidence}</Badge>}
+          {source && (
+            <span className="font-mono text-xs text-muted-foreground break-all">{source}</span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SummaryBody({ entry }: { entry: MemoryEntry }) {
   if (entry.type === "entity") {
     const name = entry.content.name;
     if (typeof name !== "string") {
@@ -80,6 +108,7 @@ export function EntriesTable({ entries }: { entries: MemoryEntry[] }) {
   const [query, setQuery] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showSuperseded, setShowSuperseded] = useState(false);
+  const [confidenceFilter, setConfidenceFilter] = useState<ConfidenceFilter>("all");
 
   const currentEntityIds = useMemo(() => new Set(currentEntities(entries).map((e) => e.id)), [
     entries,
@@ -92,10 +121,14 @@ export function EntriesTable({ entries }: { entries: MemoryEntry[] }) {
       if (!showSuperseded && entry.type === "entity" && !currentEntityIds.has(entry.id)) {
         return false;
       }
+      if (confidenceFilter !== "all") {
+        const c = confidenceOf(entry) ?? "unrecorded";
+        if (c !== confidenceFilter) return false;
+      }
       if (!q) return true;
       return JSON.stringify(entry).toLowerCase().includes(q);
     });
-  }, [entries, typeFilter, query, showSuperseded, currentEntityIds]);
+  }, [entries, typeFilter, query, showSuperseded, currentEntityIds, confidenceFilter]);
 
   const supersededCount = entries.filter(
     (e) => e.type === "entity" && !currentEntityIds.has(e.id)
@@ -119,6 +152,23 @@ export function EntriesTable({ entries }: { entries: MemoryEntry[] }) {
             <SelectItem value="entity">Entity</SelectItem>
             <SelectItem value="relation">Relation</SelectItem>
             <SelectItem value="observation">Observation</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select
+          value={confidenceFilter}
+          onValueChange={(v) => setConfidenceFilter(v as ConfidenceFilter)}
+        >
+          <SelectTrigger className="w-44">
+            <SelectValue placeholder="Confidence" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Any confidence</SelectItem>
+            {CONFIDENCE_LEVELS.map((level) => (
+              <SelectItem key={level} value={level}>
+                {level}
+              </SelectItem>
+            ))}
+            <SelectItem value="unrecorded">Not recorded</SelectItem>
           </SelectContent>
         </Select>
         {supersededCount > 0 && (

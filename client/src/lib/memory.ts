@@ -102,6 +102,29 @@ export function relationLabel(entry: MemoryEntry): string | undefined {
   return typeof label === "string" ? label : undefined;
 }
 
+export const CONFIDENCE_LEVELS = ["extracted", "inferred", "ambiguous"] as const;
+
+export type Confidence = (typeof CONFIDENCE_LEVELS)[number];
+
+/** Optional `confidence` on relations/observations (seed/sync prompt
+ *  convention). Absent or unrecognised means "not recorded", not an error —
+ *  older entries predate it. */
+export function confidenceOf(entry: MemoryEntry): Confidence | undefined {
+  const value = entry.content.confidence;
+  return typeof value === "string" && (CONFIDENCE_LEVELS as readonly string[]).includes(value)
+    ? (value as Confidence)
+    : undefined;
+}
+
+/** Optional `source` (file path, file:line or commit) an entry was derived
+ *  from. */
+export function sourceOf(entry: MemoryEntry): string | undefined {
+  const value = entry.content.source;
+  // Relations use `source` for the source *entity*, so only read it as
+  // provenance on the other two types.
+  return entry.type !== "relation" && typeof value === "string" ? value : undefined;
+}
+
 export const TYPE_BADGE_VARIANT: Record<MemoryEntry["type"], "default" | "secondary" | "outline"> = {
   entity: "default",
   relation: "secondary",

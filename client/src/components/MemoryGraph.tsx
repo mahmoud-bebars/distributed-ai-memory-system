@@ -29,12 +29,14 @@ import {
   CATEGORY_ICONS,
   categoryColor,
   categoryOf,
+  confidenceOf,
   currentEntities,
   ENTITY_CATEGORIES,
   entityName,
   observationEntityName,
   observationText,
   relationLabel,
+  type Confidence,
   type EntityCategory,
 } from "@/lib/memory";
 
@@ -44,7 +46,16 @@ interface GraphNode extends SimulationNodeDatum {
 }
 interface GraphLink extends SimulationLinkDatum<GraphNode> {
   label?: string;
+  confidence?: Confidence;
 }
+
+// Solid = extracted (or not recorded, i.e. older entries); dashed = inferred;
+// dotted and fainter = ambiguous.
+const LINK_DASH: Record<Confidence, string> = {
+  extracted: "none",
+  inferred: "6 4",
+  ambiguous: "1.5 4",
+};
 
 const WIDTH = 800;
 const HEIGHT = 520;
@@ -74,6 +85,7 @@ function buildGraph(entries: MemoryEntry[]) {
       source: String(e.content.source ?? ""),
       target: String(e.content.target ?? ""),
       label: relationLabel(e),
+      confidence: confidenceOf(e),
     }))
     .filter((l) => entityNames.has(l.source as string) && entityNames.has(l.target as string));
 
@@ -87,6 +99,7 @@ function buildGraph(entries: MemoryEntry[]) {
 
 interface RelationRef {
   label?: string;
+  confidence?: Confidence;
   name: string;
 }
 
@@ -104,10 +117,18 @@ function buildEntityDetail(entries: MemoryEntry[], name: string): EntityDetail {
   );
   const outgoing = entries
     .filter((e) => e.type === "relation" && e.content.source === name)
-    .map((e) => ({ label: relationLabel(e), name: String(e.content.target ?? "") }));
+    .map((e) => ({
+      label: relationLabel(e),
+      confidence: confidenceOf(e),
+      name: String(e.content.target ?? ""),
+    }));
   const incoming = entries
     .filter((e) => e.type === "relation" && e.content.target === name)
-    .map((e) => ({ label: relationLabel(e), name: String(e.content.source ?? "") }));
+    .map((e) => ({
+      label: relationLabel(e),
+      confidence: confidenceOf(e),
+      name: String(e.content.source ?? ""),
+    }));
   return { entity, observations, outgoing, incoming };
 }
 
@@ -193,6 +214,8 @@ export function MemoryGraph({
       .attr("fill", "none")
       .attr("stroke", "url(#dams-link-fade)")
       .attr("stroke-width", 1.5)
+      .attr("stroke-dasharray", (d) => LINK_DASH[d.confidence ?? "extracted"])
+      .attr("stroke-opacity", (d) => (d.confidence === "ambiguous" ? 0.6 : 1))
       .attr("marker-end", "url(#dams-arrow)");
 
     const nodeGroup = zoomGroup
@@ -497,6 +520,14 @@ export function MemoryGraph({
               <span className="mt-1 flex items-center gap-1.5 border-t border-border pt-1 text-muted-foreground">
                 <span className="inline-block h-px w-4 bg-muted-foreground" /> relation
               </span>
+              <span className="flex items-center gap-1.5 text-muted-foreground">
+                <span className="inline-block w-4 border-t border-dashed border-muted-foreground" />{" "}
+                inferred
+              </span>
+              <span className="flex items-center gap-1.5 text-muted-foreground">
+                <span className="inline-block w-4 border-t border-dotted border-muted-foreground" />{" "}
+                ambiguous
+              </span>
             </div>
           </div>
         )}
@@ -518,7 +549,12 @@ export function MemoryGraph({
               {detail && detail.observations.length > 0 ? (
                 <ul className="list-disc space-y-1.5 pl-5 text-sm text-muted-foreground">
                   {detail.observations.map((entry) => (
-                    <li key={entry.id}>{observationText(entry)}</li>
+                    <li key={entry.id}>
+                      {observationText(entry)}
+                      {confidenceOf(entry) && confidenceOf(entry) !== "extracted" && (
+                        <span className="ml-1.5 text-xs italic">({confidenceOf(entry)})</span>
+                      )}
+                    </li>
                   ))}
                 </ul>
               ) : (
@@ -533,11 +569,17 @@ export function MemoryGraph({
                   {detail.outgoing.map((rel, i) => (
                     <li key={`out-${i}`}>
                       → {rel.label ?? "relates to"} → {rel.name}
+                      {rel.confidence && rel.confidence !== "extracted" && (
+                        <span className="ml-1.5 text-xs italic">({rel.confidence})</span>
+                      )}
                     </li>
                   ))}
                   {detail.incoming.map((rel, i) => (
                     <li key={`in-${i}`}>
                       ← {rel.label ?? "relates to"} ← {rel.name}
+                      {rel.confidence && rel.confidence !== "extracted" && (
+                        <span className="ml-1.5 text-xs italic">({rel.confidence})</span>
+                      )}
                     </li>
                   ))}
                 </ul>
